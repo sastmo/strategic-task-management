@@ -1,0 +1,15 @@
+id,name,owner,currentImpact,futureImpact,progress,done
+t1,Stabilize Simulator API,Sales,90,40,65,false
+t2,AI Mission Planner,R&D,35,95,50,false
+t3,Pricing Redesign,Marketing,80,85,30,false
+t4,Quanser Cloud SDK,Production,45,98,55,false
+t5,Partner Enablement Pack,Sales,70,70,85,true
+t6,New Packaging Config,Production,40,92,25,false
+t7,Web Refresh: Offers,Marketing,65,60,75,false
+t8,Long-term AI Safety,Chairmans,20,90,10,false
+t9,Sales Playbooks v2,Sales,88,55,40,false
+t10,Renewal Risk Radar,Customer Success,78,72,60,false
+t11,Customer Health Scoring,Customer Success,62,88,35,false
+t12,Lab Bundle Roadmap,Academic Solutions,58,84,45,false
+t13,Curriculum Alignment Pack,Academic Solutions,50,76,70,false
+t14,Sales Playbooks v3,	Sales,10,90,20,false

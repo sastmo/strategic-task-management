@@ -1,0 +1,7 @@
+cat > .gitignore <<'EOF'
+.venv/
+__pycache__/
+*.pyc
+.streamlit/
+_uploaded_tasks.csv
+EOF
