@@ -81,7 +81,7 @@ COLUMN_ALIASES = {
     "status_done": "done",
 }
 
-DEFAULT_SOURCE = Path(__file__).parent / "tasks.csv"
+DEFAULT_SOURCE = Path(__file__).parent / "data"/"tasks.csv"
 
 
 @dataclass
