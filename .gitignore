@@ -1,7 +1,7 @@
-cat > .gitignore <<'EOF'
+stm_env/
 .venv/
 __pycache__/
 *.pyc
 .streamlit/
 _uploaded_tasks.csv
-EOF
+.DS_Store
