@@ -18,9 +18,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# =========================
-# Visual configuration
-# =========================
 BG = "#161a20"
 PANEL = "#1d2229"
 PANEL_2 = "#20262e"
@@ -34,25 +31,6 @@ DONE_GREEN = "#22c55e"
 PAUSED_GRAY = "#94a3b8"
 ACTIVE_BLUE = "#5cc8ff"
 
-ROLES = [
-    "Sales",
-    "Engineering",
-    "Marketing",
-    "Production",
-    "Committee Chair",
-    "Customer Success",
-    "Academic Solutions",
-]
-
-COLORS: Dict[str, str] = {
-    "Sales": "#2563eb",
-    "Engineering": "#eab308",
-    "Marketing": "#f97316",
-    "Production": "#a855f7",
-    "Committee Chair": "#e11d48",
-    "Customer Success": "#0ea5a4",
-    "Academic Solutions": "#eab308",
-}
 FALLBACK_OWNER_COLORS = [
     "#38bdf8",
     "#fb7185",
@@ -62,39 +40,13 @@ FALLBACK_OWNER_COLORS = [
     "#f472b6",
     "#2dd4bf",
     "#a78bfa",
+    "#f87171",
+    "#22c55e",
+    "#eab308",
+    "#60a5fa",
 ]
 
-def owner_color(owner: str) -> str:
-    owner = str(owner).strip()
-    if owner in COLORS:
-        return COLORS[owner]
-    return FALLBACK_OWNER_COLORS[sum(ord(ch) for ch in owner) % len(FALLBACK_OWNER_COLORS)]
-
-def is_paused(task: Task) -> bool:
-    return (not is_done(task)) and task.paused
-
-
-def task_status(task: Task) -> str:
-    if is_done(task):
-        return "done"
-    if is_paused(task):
-        return "paused"
-    return "active"
-
-
-def bubble_size_for_progress(progress: int) -> float:
-    min_size = 14
-    max_size = 30
-    progress = max(0, min(100, int(progress)))
-    if progress >= 100:
-        return min_size
-    return round(max_size - ((progress / 100) * (max_size - min_size)), 1)
-
-# =========================
-# Data schema
-# =========================
 REQUIRED_COLUMNS = ["id", "name", "owner", "currentImpact", "futureImpact", "progress", "done"]
-OPTIONAL_COLUMNS = ["paused", "status"]
 
 COLUMN_ALIASES = {
     "id": "id",
@@ -127,7 +79,7 @@ COLUMN_ALIASES = {
     "task_status": "status",
 }
 
-DEFAULT_SOURCE = Path(__file__).parent / "data"/"tasks.csv"
+DEFAULT_SOURCE = Path(__file__).parent / "data" / "tasks.csv"
 
 
 @dataclass
@@ -142,15 +94,13 @@ class Task:
     paused: bool = False
 
 
-# =========================
-# Input layer
-# Supports CSV / Excel / JSON / API JSON
-# =========================
 def to_bool(value) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes", "y", "done", "completed"}
 
+
 def to_paused_bool(value) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes", "y", "paused", "pause", "on hold", "hold"}
+
 
 def normalize_status(value) -> str:
     text = str(value).strip().lower()
@@ -160,13 +110,40 @@ def normalize_status(value) -> str:
         return "paused"
     return "active"
 
+
 def normalize_owner(owner: str) -> str:
     owner = str(owner).strip()
-    mapping = {
-        "R&D": "Engineering",
-        "Chairmans": "Committee Chair",
-    }
-    return mapping.get(owner, owner)
+    return owner if owner else "Unassigned"
+
+
+def owner_color(owner: str) -> str:
+    owner = normalize_owner(owner)
+    return FALLBACK_OWNER_COLORS[sum(ord(ch) for ch in owner) % len(FALLBACK_OWNER_COLORS)]
+
+
+def is_done(task: Task) -> bool:
+    return task.done or task.progress >= 100
+
+
+def is_paused(task: Task) -> bool:
+    return not is_done(task) and task.paused
+
+
+def task_status(task: Task) -> str:
+    if is_done(task):
+        return "done"
+    if is_paused(task):
+        return "paused"
+    return "active"
+
+
+def bubble_size_for_progress(progress: int) -> float:
+    min_size = 14
+    max_size = 30
+    progress = max(0, min(100, int(progress)))
+    if progress >= 100:
+        return min_size
+    return round(max_size - ((progress / 100) * (max_size - min_size)), 1)
 
 
 def detect_source_kind(source: str) -> str:
@@ -216,25 +193,18 @@ def read_source_to_frame(source: str) -> pd.DataFrame:
     return pd.DataFrame(extract_json_records(response.json()))
 
 
-# =========================
-# Processing layer
-# Standardize, validate, clean
-# =========================
 def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
     rename_map = {}
     for col in df.columns:
         clean = str(col).strip().replace("-", " ").replace("_", " ").lower()
-        rename_map[col] = COLUMN_ALIASES.get(
-            clean,
-            COLUMN_ALIASES.get(clean.replace(" ", ""), str(col).strip())
-        )
+        rename_map[col] = COLUMN_ALIASES.get(clean, COLUMN_ALIASES.get(clean.replace(" ", ""), str(col).strip()))
     return df.rename(columns=rename_map)
 
 
 def validate_and_clean(df: pd.DataFrame) -> pd.DataFrame:
     df = standardize_columns(df).copy()
 
-    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
     if missing:
         raise ValueError(f"Missing columns after normalization: {', '.join(missing)}")
 
@@ -307,45 +277,30 @@ def load_tasks(source: str) -> List[Task]:
         for _, row in df.iterrows()
     ]
 
-# =========================
-# Dashboard helpers
-# =========================
-def is_done(task: Task) -> bool:
-    return task.done or task.progress >= 100
 
 def owner_order(tasks: List[Task]) -> List[str]:
     seen = []
     for task in tasks:
-        owner = str(task.owner).strip()
-        if owner and owner not in seen:
+        owner = normalize_owner(task.owner)
+        if owner not in seen:
             seen.append(owner)
-
-    preferred = [role for role in ROLES if role in seen]
-    extras = [owner for owner in seen if owner not in ROLES]
-    return preferred + extras
+    return seen
 
 
 def owner_groups(tasks: List[Task]) -> Dict[str, List[Task]]:
     groups: Dict[str, List[Task]] = {owner: [] for owner in owner_order(tasks)}
     for task in tasks:
-        groups.setdefault(task.owner, []).append(task)
+        groups.setdefault(normalize_owner(task.owner), []).append(task)
     return groups
 
 
 def active_index_by_owner(tasks: List[Task]) -> Dict[str, Dict[str, int]]:
     index_map: Dict[str, Dict[str, int]] = {}
-    groups = owner_groups(tasks)
-    for owner, items in groups.items():
+    for owner, items in owner_groups(tasks).items():
         active = [task for task in items if task_status(task) == "active"]
-        index_map[owner] = {task.id: i + 1 for i, task in enumerate(active)}
+        index_map[owner] = {task.id: index + 1 for index, task in enumerate(active)}
     return index_map
 
-def active_index_by_owner(tasks: List[Task]) -> Dict[str, Dict[str, int]]:
-    index_map: Dict[str, Dict[str, int]] = {}
-    for owner in owner_groups(tasks).keys():
-        active = [task for task in tasks if task.owner == owner and not is_done(task)]
-        index_map[owner] = {task.id: i + 1 for i, task in enumerate(active)}
-    return index_map
 
 def build_task_payload(tasks: List[Task]) -> List[Dict[str, object]]:
     groups = owner_groups(tasks)
@@ -356,22 +311,23 @@ def build_task_payload(tasks: List[Task]) -> List[Dict[str, object]]:
     }
 
     payload: List[Dict[str, object]] = []
+
     for task in tasks:
+        owner = normalize_owner(task.owner)
         status = task_status(task)
-        total_active = len(active_ids.get(task.owner, []))
 
         if status == "done":
             point_color = DONE_GREEN
         elif status == "paused":
             point_color = PAUSED_GRAY
         else:
-            point_color = owner_color(task.owner)
+            point_color = owner_color(owner)
 
         payload.append(
             {
                 "id": task.id,
                 "name": task.name,
-                "owner": task.owner,
+                "owner": owner,
                 "currentImpact": task.currentImpact,
                 "futureImpact": task.futureImpact,
                 "progress": task.progress,
@@ -379,30 +335,33 @@ def build_task_payload(tasks: List[Task]) -> List[Dict[str, object]]:
                 "paused": status == "paused",
                 "status": status,
                 "pointColor": point_color,
-                "ownerColor": owner_color(task.owner),
+                "ownerColor": owner_color(owner),
                 "bubbleSize": bubble_size_for_progress(task.progress),
-                "activeIndex": active_map.get(task.owner, {}).get(task.id, 0),
-                "activeTotal": total_active,
+                "activeIndex": active_map.get(owner, {}).get(task.id, 0),
+                "activeTotal": len(active_ids.get(owner, [])),
             }
         )
+
     return payload
+
 
 def owner_cards_html(tasks: List[Task]) -> str:
     groups = owner_groups(tasks)
-    ordered_roles = list(groups.keys())
+    ordered_owners = list(groups.keys())
 
     overall = {
-        owner: round(sum(task.progress for task in groups[owner]) / len(groups[owner])) if groups[owner] else 0
-        for owner in ordered_roles
+        owner: round(sum(task.progress for task in items) / len(items)) if items else 0
+        for owner, items in groups.items()
     }
     active_ids = {
         owner: [task.id for task in groups[owner] if task_status(task) == "active"]
-        for owner in ordered_roles
+        for owner in ordered_owners
     }
 
-    def task_html(task: Task) -> str:
-        safe_name = escape(task.name)
+    def render_task(task: Task) -> str:
+        owner = normalize_owner(task.owner)
         status = task_status(task)
+        safe_name = escape(task.name)
 
         if status == "done":
             color = DONE_GREEN
@@ -411,10 +370,10 @@ def owner_cards_html(tasks: List[Task]) -> str:
             color = PAUSED_GRAY
             label = "Paused"
         else:
-            color = owner_color(task.owner)
-            ids = active_ids.get(task.owner, [])
-            idx = ids.index(task.id) + 1 if task.id in ids else 0
-            label = f"Active {idx}/{len(ids)}"
+            ids = active_ids.get(owner, [])
+            index = ids.index(task.id) + 1 if task.id in ids else 0
+            color = owner_color(owner)
+            label = f"Active {index}/{len(ids)}"
 
         return f"""
         <div class="task-card">
@@ -431,13 +390,18 @@ def owner_cards_html(tasks: List[Task]) -> str:
         """
 
     panels = []
-    for owner in ordered_roles:
+
+    for owner in ordered_owners:
         items = groups[owner]
         visible_items = items[:3]
         extra_items = items[3:]
 
-        visible_cards = "\n".join(task_html(task) for task in visible_items) if visible_items else '<div class="empty-state">No tasks assigned</div>'
-        extra_cards = "\n".join(task_html(task) for task in extra_items)
+        visible_cards = (
+            "\n".join(render_task(task) for task in visible_items)
+            if visible_items
+            else '<div class="empty-state">No tasks assigned</div>'
+        )
+        extra_cards = "\n".join(render_task(task) for task in extra_items)
 
         more_html = ""
         if extra_items:
@@ -453,29 +417,30 @@ def owner_cards_html(tasks: List[Task]) -> str:
         safe_owner = escape(owner)
         task_word = "task" if len(items) == 1 else "tasks"
 
-        panels.append(f"""
-        <details class="owner-panel" open>
-          <summary class="owner-summary">
-            <div class="owner-left">
-              <div class="owner-name">{safe_owner}</div>
-            </div>
-            <div class="owner-right">
-              <div class="owner-overall">Overall: {overall[owner]}%</div>
-              <div class="owner-count">{len(items)} {task_word}</div>
-            </div>
-          </summary>
-          <div class="progress-track owner-track"><i style="width:{overall[owner]}%;background:{owner_color(owner)}"></i></div>
-          <div class="owner-cards">
-            {visible_cards}
-            {more_html}
-          </div>
-        </details>
-        """)
+        panels.append(
+            f"""
+            <details class="owner-panel" open>
+              <summary class="owner-summary">
+                <div class="owner-left">
+                  <div class="owner-name">{safe_owner}</div>
+                </div>
+                <div class="owner-right">
+                  <div class="owner-overall">Overall: {overall[owner]}%</div>
+                  <div class="owner-count">{len(items)} {task_word}</div>
+                </div>
+              </summary>
+              <div class="progress-track owner-track"><i style="width:{overall[owner]}%;background:{owner_color(owner)}"></i></div>
+              <div class="owner-cards">
+                {visible_cards}
+                {more_html}
+              </div>
+            </details>
+            """
+        )
 
     return "\n".join(panels)
-# =========================
-# UI layer
-# =========================
+
+
 def build_dashboard_html(tasks: List[Task]) -> str:
     tasks_json = json.dumps(build_task_payload(tasks))
     owners_html = owner_cards_html(tasks)
@@ -640,7 +605,7 @@ def build_dashboard_html(tasks: List[Task]) -> str:
       color: {TEXT};
     }}
     .section-title {{
-      margin: 18px 0 10px 2px;
+      margin: 32px 0 10px 2px;
       font-size: 24px;
       font-weight: 700;
       color: {TEXT};
@@ -1071,30 +1036,28 @@ def build_dashboard_html(tasks: List[Task]) -> str:
 </body>
 </html>
 """
-# =========================
-# Streamlit shell
-# =========================
 st.markdown(
     """
     <style>
-      .stApp {
-        background: #161a20;
+      .stApp,
+      [data-testid="stAppViewContainer"],
+      [data-testid="stHeader"] {
+        background: #161a20 !important;
       }
+
       .block-container {
         padding-top: 2.5rem;
         padding-bottom: 1.25rem;
         max-width: 1560px;
       }
+
       h1, .stApp h1 {
         color: #ffffff !important;
-        margin-top: 0.5rem !important;
-        margin-bottom: 1rem !important;
       }
     </style>
     """,
     unsafe_allow_html=True,
 )
-
 st.title("Strategic Task Management")
 
 tasks = load_tasks(str(DEFAULT_SOURCE))
