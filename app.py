@@ -30,8 +30,9 @@ TEXT_MUTED = "#a7b1bf"
 TEXT_MUTED2 = "#8f99a8"
 TEXT_MUTED3 = "#cfd6df"
 
-DONE_GRAY = "#94a3b8"
-NOT_DONE_BLUE = "#5cc8ff"
+DONE_GREEN = "#22c55e"
+PAUSED_GRAY = "#94a3b8"
+ACTIVE_BLUE = "#5cc8ff"
 
 ROLES = [
     "Sales",
@@ -45,18 +46,55 @@ ROLES = [
 
 COLORS: Dict[str, str] = {
     "Sales": "#2563eb",
-    "Engineering": "#16a34a",
+    "Engineering": "#eab308",
     "Marketing": "#f97316",
     "Production": "#a855f7",
     "Committee Chair": "#e11d48",
     "Customer Success": "#0ea5a4",
     "Academic Solutions": "#eab308",
 }
+FALLBACK_OWNER_COLORS = [
+    "#38bdf8",
+    "#fb7185",
+    "#34d399",
+    "#f59e0b",
+    "#818cf8",
+    "#f472b6",
+    "#2dd4bf",
+    "#a78bfa",
+]
+
+def owner_color(owner: str) -> str:
+    owner = str(owner).strip()
+    if owner in COLORS:
+        return COLORS[owner]
+    return FALLBACK_OWNER_COLORS[sum(ord(ch) for ch in owner) % len(FALLBACK_OWNER_COLORS)]
+
+def is_paused(task: Task) -> bool:
+    return (not is_done(task)) and task.paused
+
+
+def task_status(task: Task) -> str:
+    if is_done(task):
+        return "done"
+    if is_paused(task):
+        return "paused"
+    return "active"
+
+
+def bubble_size_for_progress(progress: int) -> float:
+    min_size = 14
+    max_size = 30
+    progress = max(0, min(100, int(progress)))
+    if progress >= 100:
+        return min_size
+    return round(max_size - ((progress / 100) * (max_size - min_size)), 1)
 
 # =========================
 # Data schema
 # =========================
 REQUIRED_COLUMNS = ["id", "name", "owner", "currentImpact", "futureImpact", "progress", "done"]
+OPTIONAL_COLUMNS = ["paused", "status"]
 
 COLUMN_ALIASES = {
     "id": "id",
@@ -79,6 +117,14 @@ COLUMN_ALIASES = {
     "completion": "progress",
     "done": "done",
     "status_done": "done",
+    "paused": "paused",
+    "pause": "paused",
+    "on hold": "paused",
+    "on_hold": "paused",
+    "hold": "paused",
+    "status": "status",
+    "task status": "status",
+    "task_status": "status",
 }
 
 DEFAULT_SOURCE = Path(__file__).parent / "data"/"tasks.csv"
@@ -93,6 +139,7 @@ class Task:
     futureImpact: int
     progress: int
     done: bool = False
+    paused: bool = False
 
 
 # =========================
@@ -102,6 +149,16 @@ class Task:
 def to_bool(value) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes", "y", "done", "completed"}
 
+def to_paused_bool(value) -> bool:
+    return str(value).strip().lower() in {"true", "1", "yes", "y", "paused", "pause", "on hold", "hold"}
+
+def normalize_status(value) -> str:
+    text = str(value).strip().lower()
+    if text in {"done", "complete", "completed", "finished"}:
+        return "done"
+    if text in {"paused", "pause", "on hold", "hold"}:
+        return "paused"
+    return "active"
 
 def normalize_owner(owner: str) -> str:
     owner = str(owner).strip()
@@ -181,6 +238,11 @@ def validate_and_clean(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Missing columns after normalization: {', '.join(missing)}")
 
+    if "paused" not in df.columns:
+        df["paused"] = False
+    if "status" not in df.columns:
+        df["status"] = ""
+
     df["id"] = df["id"].astype(str).str.strip()
     df["name"] = df["name"].astype(str).str.strip()
     df["owner"] = df["owner"].apply(normalize_owner)
@@ -206,7 +268,14 @@ def validate_and_clean(df: pd.DataFrame) -> pd.DataFrame:
         .round()
         .astype(int)
     )
-    df["done"] = df["done"].apply(to_bool) | (df["progress"] >= 100)
+
+    df["status"] = df["status"].apply(normalize_status)
+
+    done_from_status = df["status"].eq("done")
+    paused_from_status = df["status"].eq("paused")
+
+    df["done"] = df["done"].apply(to_bool) | (df["progress"] >= 100) | done_from_status
+    df["paused"] = (~df["done"]) & (df["paused"].apply(to_paused_bool) | paused_from_status)
 
     df = df[df["name"].ne("")].copy()
 
@@ -219,7 +288,7 @@ def validate_and_clean(df: pd.DataFrame) -> pd.DataFrame:
             deduped.append(value if count == 1 else f"{value}-{count}")
         df["id"] = deduped
 
-    return df[REQUIRED_COLUMNS]
+    return df[REQUIRED_COLUMNS + ["paused"]]
 
 
 def load_tasks(source: str) -> List[Task]:
@@ -233,10 +302,10 @@ def load_tasks(source: str) -> List[Task]:
             futureImpact=int(row["futureImpact"]),
             progress=int(row["progress"]),
             done=bool(row["done"]),
+            paused=bool(row["paused"]),
         )
         for _, row in df.iterrows()
     ]
-
 
 # =========================
 # Dashboard helpers
@@ -244,13 +313,32 @@ def load_tasks(source: str) -> List[Task]:
 def is_done(task: Task) -> bool:
     return task.done or task.progress >= 100
 
+def owner_order(tasks: List[Task]) -> List[str]:
+    seen = []
+    for task in tasks:
+        owner = str(task.owner).strip()
+        if owner and owner not in seen:
+            seen.append(owner)
+
+    preferred = [role for role in ROLES if role in seen]
+    extras = [owner for owner in seen if owner not in ROLES]
+    return preferred + extras
+
 
 def owner_groups(tasks: List[Task]) -> Dict[str, List[Task]]:
-    groups: Dict[str, List[Task]] = {role: [] for role in ROLES}
+    groups: Dict[str, List[Task]] = {owner: [] for owner in owner_order(tasks)}
     for task in tasks:
         groups.setdefault(task.owner, []).append(task)
     return groups
 
+
+def active_index_by_owner(tasks: List[Task]) -> Dict[str, Dict[str, int]]:
+    index_map: Dict[str, Dict[str, int]] = {}
+    groups = owner_groups(tasks)
+    for owner, items in groups.items():
+        active = [task for task in items if task_status(task) == "active"]
+        index_map[owner] = {task.id: i + 1 for i, task in enumerate(active)}
+    return index_map
 
 def active_index_by_owner(tasks: List[Task]) -> Dict[str, Dict[str, int]]:
     index_map: Dict[str, Dict[str, int]] = {}
@@ -259,18 +347,26 @@ def active_index_by_owner(tasks: List[Task]) -> Dict[str, Dict[str, int]]:
         index_map[owner] = {task.id: i + 1 for i, task in enumerate(active)}
     return index_map
 
-
 def build_task_payload(tasks: List[Task]) -> List[Dict[str, object]]:
     groups = owner_groups(tasks)
     active_map = active_index_by_owner(tasks)
     active_ids = {
-        owner: [task.id for task in items if not is_done(task)]
+        owner: [task.id for task in items if task_status(task) == "active"]
         for owner, items in groups.items()
     }
 
     payload: List[Dict[str, object]] = []
     for task in tasks:
+        status = task_status(task)
         total_active = len(active_ids.get(task.owner, []))
+
+        if status == "done":
+            point_color = DONE_GREEN
+        elif status == "paused":
+            point_color = PAUSED_GRAY
+        else:
+            point_color = owner_color(task.owner)
+
         payload.append(
             {
                 "id": task.id,
@@ -279,37 +375,47 @@ def build_task_payload(tasks: List[Task]) -> List[Dict[str, object]]:
                 "currentImpact": task.currentImpact,
                 "futureImpact": task.futureImpact,
                 "progress": task.progress,
-                "done": is_done(task),
-                "status": "done" if is_done(task) else "not_done",
-                "pointColor": DONE_GRAY if is_done(task) else COLORS.get(task.owner, "#64748b"),
-                "ownerColor": COLORS.get(task.owner, "#64748b"),
-                "bubbleSize": 18,
+                "done": status == "done",
+                "paused": status == "paused",
+                "status": status,
+                "pointColor": point_color,
+                "ownerColor": owner_color(task.owner),
+                "bubbleSize": bubble_size_for_progress(task.progress),
                 "activeIndex": active_map.get(task.owner, {}).get(task.id, 0),
                 "activeTotal": total_active,
             }
         )
     return payload
 
-
 def owner_cards_html(tasks: List[Task]) -> str:
     groups = owner_groups(tasks)
-    ordered_roles = ROLES + [owner for owner in groups.keys() if owner not in ROLES]
+    ordered_roles = list(groups.keys())
 
     overall = {
         owner: round(sum(task.progress for task in groups[owner]) / len(groups[owner])) if groups[owner] else 0
         for owner in ordered_roles
     }
     active_ids = {
-        owner: [task.id for task in groups[owner] if not is_done(task)]
+        owner: [task.id for task in groups[owner] if task_status(task) == "active"]
         for owner in ordered_roles
     }
 
     def task_html(task: Task) -> str:
         safe_name = escape(task.name)
-        color = DONE_GRAY if is_done(task) else COLORS.get(task.owner, "#64748b")
-        ids = active_ids.get(task.owner, [])
-        idx = ids.index(task.id) + 1 if task.id in ids else 0
-        label = "Done" if is_done(task) else f"Active {idx}/{len(ids)}"
+        status = task_status(task)
+
+        if status == "done":
+            color = DONE_GREEN
+            label = "Done"
+        elif status == "paused":
+            color = PAUSED_GRAY
+            label = "Paused"
+        else:
+            color = owner_color(task.owner)
+            ids = active_ids.get(task.owner, [])
+            idx = ids.index(task.id) + 1 if task.id in ids else 0
+            label = f"Active {idx}/{len(ids)}"
+
         return f"""
         <div class="task-card">
           <div class="task-row">
@@ -327,12 +433,10 @@ def owner_cards_html(tasks: List[Task]) -> str:
     panels = []
     for owner in ordered_roles:
         items = groups[owner]
-
         visible_items = items[:3]
         extra_items = items[3:]
 
         visible_cards = "\n".join(task_html(task) for task in visible_items) if visible_items else '<div class="empty-state">No tasks assigned</div>'
-
         extra_cards = "\n".join(task_html(task) for task in extra_items)
 
         more_html = ""
@@ -344,7 +448,8 @@ def owner_cards_html(tasks: List[Task]) -> str:
                 {extra_cards}
               </div>
             </details>
-        """
+            """
+
         safe_owner = escape(owner)
         task_word = "task" if len(items) == 1 else "tasks"
 
@@ -359,7 +464,7 @@ def owner_cards_html(tasks: List[Task]) -> str:
               <div class="owner-count">{len(items)} {task_word}</div>
             </div>
           </summary>
-          <div class="progress-track owner-track"><i style="width:{overall[owner]}%;background:{COLORS.get(owner, '#64748b')}"></i></div>
+          <div class="progress-track owner-track"><i style="width:{overall[owner]}%;background:{owner_color(owner)}"></i></div>
           <div class="owner-cards">
             {visible_cards}
             {more_html}
@@ -368,8 +473,6 @@ def owner_cards_html(tasks: List[Task]) -> str:
         """)
 
     return "\n".join(panels)
-
-
 # =========================
 # UI layer
 # =========================
@@ -378,9 +481,11 @@ def build_dashboard_html(tasks: List[Task]) -> str:
     owners_html = owner_cards_html(tasks)
 
     role_legend = "".join(
-        f'<div class="role-chip"><span class="role-swatch" style="background:{COLORS[role]}"></span>{escape(role)}</div>'
-        for role in ROLES
+        f'<div class="role-chip"><span class="role-swatch" style="background:{owner_color(owner)}"></span>{escape(owner)}</div>'
+        for owner in owner_order(tasks)
     )
+    role_legend += f'<div class="role-chip"><span class="role-swatch" style="background:{DONE_GREEN}"></span>Done</div>'
+    role_legend += f'<div class="role-chip"><span class="role-swatch" style="background:{PAUSED_GRAY}"></span>Paused</div>'
 
     return f"""
 <!doctype html>
@@ -492,7 +597,7 @@ def build_dashboard_html(tasks: List[Task]) -> str:
     }}
     .status-row {{
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, 1fr);
       gap: 10px;
       margin-top: 14px;
     }}
@@ -663,7 +768,6 @@ def build_dashboard_html(tasks: List[Task]) -> str:
       <p class="panel-subtitle">X-axis: Current Offering. Y-axis: Future Offering.</p>
       <div class="role-legend">
         {role_legend}
-        <div class="role-chip"><span class="role-swatch" style="background:{DONE_GRAY}"></span>Done</div>
       </div>
     </div>
 
@@ -682,12 +786,16 @@ def build_dashboard_html(tasks: List[Task]) -> str:
         <div id="portfolioChart"></div>
         <div class="status-row">
           <button id="donePill" class="status-pill" type="button">
-            <div class="status-label"><span class="status-dot" style="background:{DONE_GRAY}"></span>Done</div>
+            <div class="status-label"><span class="status-dot" style="background:{DONE_GREEN}"></span>Done</div>
             <div id="doneValue" class="status-value">-</div>
           </button>
-          <button id="notDonePill" class="status-pill" type="button">
-            <div class="status-label"><span class="status-dot" style="background:{NOT_DONE_BLUE}"></span>Not Finished</div>
-            <div id="notDoneValue" class="status-value">-</div>
+          <button id="pausedPill" class="status-pill" type="button">
+            <div class="status-label"><span class="status-dot" style="background:{PAUSED_GRAY}"></span>Paused</div>
+            <div id="pausedValue" class="status-value">-</div>
+          </button>
+          <button id="activePill" class="status-pill" type="button">
+            <div class="status-label"><span class="status-dot" style="background:{ACTIVE_BLUE}"></span>Active</div>
+            <div id="activeValue" class="status-value">-</div>
           </button>
         </div>
       </div>
@@ -708,10 +816,14 @@ def build_dashboard_html(tasks: List[Task]) -> str:
     const portfolioEl = document.getElementById("portfolioChart");
     const activeFilterLabelEl = document.getElementById("activeFilterLabel");
     const clearFilterBtn = document.getElementById("clearFilterBtn");
+
     const donePill = document.getElementById("donePill");
-    const notDonePill = document.getElementById("notDonePill");
+    const pausedPill = document.getElementById("pausedPill");
+    const activePill = document.getElementById("activePill");
+
     const doneValue = document.getElementById("doneValue");
-    const notDoneValue = document.getElementById("notDoneValue");
+    const pausedValue = document.getElementById("pausedValue");
+    const activeValue = document.getElementById("activeValue");
 
     function escapeHtml(value) {{
       return String(value)
@@ -724,7 +836,8 @@ def build_dashboard_html(tasks: List[Task]) -> str:
 
     function statusLabel(status) {{
       if (status === "done") return "Done";
-      if (status === "not_done") return "Not Finished";
+      if (status === "paused") return "Paused";
+      if (status === "active") return "Active";
       return "All tasks";
     }}
 
@@ -740,20 +853,33 @@ def build_dashboard_html(tasks: List[Task]) -> str:
 
     function updateStatusPills() {{
       const doneCount = TASKS.filter(task => task.status === "done").length;
-      const notDoneCount = TASKS.filter(task => task.status === "not_done").length;
+      const pausedCount = TASKS.filter(task => task.status === "paused").length;
+      const activeCount = TASKS.filter(task => task.status === "active").length;
+
       const total = TASKS.length || 1;
       const donePct = Math.round((doneCount / total) * 100);
-      const notDonePct = 100 - donePct;
+      const pausedPct = Math.round((pausedCount / total) * 100);
+      const activePct = Math.round((activeCount / total) * 100);
 
       doneValue.textContent = `${{donePct}}% (${{doneCount}}/${{TASKS.length}})`;
-      notDoneValue.textContent = `${{notDonePct}}% (${{notDoneCount}}/${{TASKS.length}})`;
+      pausedValue.textContent = `${{pausedPct}}% (${{pausedCount}}/${{TASKS.length}})`;
+      activeValue.textContent = `${{activePct}}% (${{activeCount}}/${{TASKS.length}})`;
 
       donePill.classList.toggle("active", activeFilter === "done");
-      notDonePill.classList.toggle("active", activeFilter === "not_done");
+      pausedPill.classList.toggle("active", activeFilter === "paused");
+      activePill.classList.toggle("active", activeFilter === "active");
     }}
 
     function buildHoverText(task) {{
-      const statusLine = task.done ? "Done" : `Active ${{task.activeIndex}}/${{task.activeTotal}}`;
+      let statusLine = "Active";
+      if (task.status === "done") {{
+        statusLine = "Done";
+      }} else if (task.status === "paused") {{
+        statusLine = "Paused";
+      }} else {{
+        statusLine = `Active ${{task.activeIndex}}/${{task.activeTotal}}`;
+      }}
+
       return `<b>${{escapeHtml(task.name)}}</b><br>` +
              `Owner: ${{escapeHtml(task.owner)}}<br>` +
              `Current Impact: ${{task.currentImpact}}<br>` +
@@ -764,7 +890,7 @@ def build_dashboard_html(tasks: List[Task]) -> str:
 
     function renderImpactChart() {{
       const visibleTasks = getVisibleTasks();
-      const activeTasks = visibleTasks.filter(task => !task.done);
+      const activeTasks = visibleTasks.filter(task => task.status === "active");
 
       const haloTrace = {{
         x: activeTasks.map(task => task.currentImpact),
@@ -837,10 +963,13 @@ def build_dashboard_html(tasks: List[Task]) -> str:
 
     function renderPortfolioChart() {{
       const doneCount = TASKS.filter(task => task.status === "done").length;
-      const notDoneCount = TASKS.filter(task => task.status === "not_done").length;
+      const pausedCount = TASKS.filter(task => task.status === "paused").length;
+      const activeCount = TASKS.filter(task => task.status === "active").length;
+
       const total = TASKS.length || 1;
       const donePct = Math.round((doneCount / total) * 100);
-      const notDonePct = 100 - donePct;
+      const pausedPct = Math.round((pausedCount / total) * 100);
+      const activePct = 100 - donePct - pausedPct;
 
       const doneTrace = {{
         x: [donePct],
@@ -848,25 +977,39 @@ def build_dashboard_html(tasks: List[Task]) -> str:
         type: "bar",
         orientation: "h",
         marker: {{
-          color: "{DONE_GRAY}",
-          opacity: activeFilter === "not_done" ? 0.35 : 1,
+          color: "{DONE_GREEN}",
+          opacity: activeFilter !== "all" && activeFilter !== "done" ? 0.35 : 1,
         }},
         customdata: ["done"],
         hovertemplate: `Done: ${{donePct}}% (${{doneCount}}/${{TASKS.length}})<extra></extra>`,
         showlegend: false,
       }};
 
-      const notDoneTrace = {{
-        x: [notDonePct],
+      const pausedTrace = {{
+        x: [pausedPct],
         y: [""],
         type: "bar",
         orientation: "h",
         marker: {{
-          color: "{NOT_DONE_BLUE}",
-          opacity: activeFilter === "done" ? 0.35 : 1,
+          color: "{PAUSED_GRAY}",
+          opacity: activeFilter !== "all" && activeFilter !== "paused" ? 0.35 : 1,
         }},
-        customdata: ["not_done"],
-        hovertemplate: `Not Finished: ${{notDonePct}}% (${{notDoneCount}}/${{TASKS.length}})<extra></extra>`,
+        customdata: ["paused"],
+        hovertemplate: `Paused: ${{pausedPct}}% (${{pausedCount}}/${{TASKS.length}})<extra></extra>`,
+        showlegend: false,
+      }};
+
+      const activeTrace = {{
+        x: [activePct],
+        y: [""],
+        type: "bar",
+        orientation: "h",
+        marker: {{
+          color: "{ACTIVE_BLUE}",
+          opacity: activeFilter !== "all" && activeFilter !== "active" ? 0.35 : 1,
+        }},
+        customdata: ["active"],
+        hovertemplate: `Active: ${{activePct}}% (${{activeCount}}/${{TASKS.length}})<extra></extra>`,
         showlegend: false,
       }};
 
@@ -886,7 +1029,7 @@ def build_dashboard_html(tasks: List[Task]) -> str:
         }},
       }};
 
-      Plotly.react(portfolioEl, [doneTrace, notDoneTrace], layout, {{
+      Plotly.react(portfolioEl, [doneTrace, pausedTrace, activeTrace], layout, {{
         displayModeBar: false,
         responsive: true,
       }});
@@ -915,8 +1058,12 @@ def build_dashboard_html(tasks: List[Task]) -> str:
       toggleFilter("done");
     }});
 
-    notDonePill.addEventListener("click", function() {{
-      toggleFilter("not_done");
+    pausedPill.addEventListener("click", function() {{
+      toggleFilter("paused");
+    }});
+
+    activePill.addEventListener("click", function() {{
+      toggleFilter("active");
     }});
 
     renderDashboard();
@@ -924,8 +1071,6 @@ def build_dashboard_html(tasks: List[Task]) -> str:
 </body>
 </html>
 """
-
-
 # =========================
 # Streamlit shell
 # =========================
@@ -936,12 +1081,14 @@ st.markdown(
         background: #161a20;
       }
       .block-container {
-        padding-top: 1rem;
+        padding-top: 2.5rem;
         padding-bottom: 1.25rem;
         max-width: 1560px;
       }
       h1, .stApp h1 {
         color: #ffffff !important;
+        margin-top: 0.5rem !important;
+        margin-bottom: 1rem !important;
       }
     </style>
     """,
