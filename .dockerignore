@@ -1,0 +1,8 @@
+stm_env/
+.venv/
+__pycache__/
+*.pyc
+.git
+.gitignore
+.DS_Store
+assets/

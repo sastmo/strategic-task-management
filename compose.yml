@@ -1,0 +1,7 @@
+services:
+  app:
+    build: .
+    container_name: strategic-task-management
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
