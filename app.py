@@ -79,8 +79,8 @@ COLUMN_ALIASES = {
     "task_status": "status",
 }
 
-DEFAULT_SOURCE = Path(__file__).parent / "data" / "tasks.csv"
-
+import os
+DEFAULT_SOURCE = Path(os.getenv("TASKS_SOURCE", "/app/data/tasks.csv"))
 
 @dataclass
 class Task:

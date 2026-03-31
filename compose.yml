@@ -3,5 +3,15 @@ services:
     build: .
     container_name: strategic-task-management
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - ./data:/app/data
+    environment:
+      TASKS_SOURCE: /app/data/tasks.csv
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
