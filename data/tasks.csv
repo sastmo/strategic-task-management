@@ -1,16 +1,16 @@
 id,name,owner,currentImpact,futureImpact,progress,done,paused
-t1,Stabilize Simulator API,Sales,90,40,65,false,false
-t2,AI Mission Planner,Engineering,35,95,50,false,false
-t3,Pricing Redesign,Marketing,80,85,30,false,true
-t4,Quanser Cloud SDK,Production,45,98,55,false,false
-t5,Partner Enablement Pack,Sales,70,70,100,true,false
-t6,New Packaging Config,Production,40,92,25,false,false
-t7,Web Refresh: Offers,Marketing,65,60,75,false,false
-t8,Long-term AI Safety,test,20,90,10,false,false
-t9,Sales Playbooks v2,Sales,88,55,40,false,false
-t10,Renewal Risk Radar,Customer Success,78,72,60,false,false
-t11,Customer Health Scoring,Customer Success,62,88,35,false,false
-t12,Lab Bundle Roadmap,Academic Solutions,58,84,45,false,false
-t13,Curriculum Alignment Pack,Academic Solutions,50,76,70,false,false
-t14,Sales Playbooks v3,Sales,10,90,20,false,false
-t15,Sales Playbooks v4,Morteza,10,90,20,false,false
+t1,Stabilize Simulator API,team1,90,40,65,false,false
+t2,AI Mission Planner,team2,35,95,50,false,false
+t3,Pricing Redesign,team3,80,85,30,false,true
+t4,Quanser Cloud SDK,team4,45,98,55,false,false
+t5,Partner Enablement Pack,team5,70,70,100,true,false
+t6,New Packaging Config,team4,40,92,25,false,false
+t7,Web Refresh: Offers,team5,65,60,75,false,false
+t8,Long-term AI Safety,team3,20,90,10,false,false
+t9,Sales Playbooks v2,team1,88,55,40,false,false
+t10,Renewal Risk Radar,team3,78,72,60,false,false
+t11,Customer Health Scoring,team3,62,88,35,false,false
+t12,Lab Bundle Roadmap,team3,58,84,45,false,false
+t13,Curriculum Alignment Pack,team6,50,76,70,false,false
+t14,Sales Playbooks v3,team7,10,90,20,false,false
+t15,Sales Playbooks v4,team8,10,90,20,false,false
