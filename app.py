@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 from typing import Dict, List
 import json
+import os
 
-import pandas as pd
-import requests
 import streamlit as st
 import streamlit.components.v1 as components
+
+from src.loader import load_tasks
+from src.schema import Task, normalize_owner, task_status
 
 
 st.set_page_config(
@@ -18,6 +19,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# =========================
+# Visual configuration
+# =========================
 BG = "#161a20"
 PANEL = "#1d2229"
 PANEL_2 = "#20262e"
@@ -46,259 +50,59 @@ FALLBACK_OWNER_COLORS = [
     "#60a5fa",
 ]
 
-REQUIRED_COLUMNS = ["id", "name", "owner", "currentImpact", "futureImpact", "progress", "done"]
-
-COLUMN_ALIASES = {
-    "id": "id",
-    "task id": "id",
-    "task_id": "id",
-    "name": "name",
-    "task": "name",
-    "task name": "name",
-    "task_name": "name",
-    "owner": "owner",
-    "department": "owner",
-    "team": "owner",
-    "currentimpact": "currentImpact",
-    "current impact": "currentImpact",
-    "current_impact": "currentImpact",
-    "futureimpact": "futureImpact",
-    "future impact": "futureImpact",
-    "future_impact": "futureImpact",
-    "progress": "progress",
-    "completion": "progress",
-    "done": "done",
-    "status_done": "done",
-    "paused": "paused",
-    "pause": "paused",
-    "on hold": "paused",
-    "on_hold": "paused",
-    "hold": "paused",
-    "status": "status",
-    "task status": "status",
-    "task_status": "status",
-}
-
-import os
-DEFAULT_SOURCE = Path(os.getenv("TASKS_SOURCE", "/app/data/tasks.csv"))
-
-@dataclass
-class Task:
-    id: str
-    name: str
-    owner: str
-    currentImpact: int
-    futureImpact: int
-    progress: int
-    done: bool = False
-    paused: bool = False
-
-
-def to_bool(value) -> bool:
-    return str(value).strip().lower() in {"true", "1", "yes", "y", "done", "completed"}
-
-
-def to_paused_bool(value) -> bool:
-    return str(value).strip().lower() in {"true", "1", "yes", "y", "paused", "pause", "on hold", "hold"}
-
-
-def normalize_status(value) -> str:
-    text = str(value).strip().lower()
-    if text in {"done", "complete", "completed", "finished"}:
-        return "done"
-    if text in {"paused", "pause", "on hold", "hold"}:
-        return "paused"
-    return "active"
-
-
-def normalize_owner(owner: str) -> str:
-    owner = str(owner).strip()
-    return owner if owner else "Unassigned"
+DEFAULT_SOURCE = Path(
+    os.getenv(
+        "TASKS_SOURCE",
+        str(Path(__file__).resolve().parent / "data" / "tasks.csv"),
+    )
+)
 
 
 def owner_color(owner: str) -> str:
     owner = normalize_owner(owner)
-    return FALLBACK_OWNER_COLORS[sum(ord(ch) for ch in owner) % len(FALLBACK_OWNER_COLORS)]
-
-
-def is_done(task: Task) -> bool:
-    return task.done or task.progress >= 100
-
-
-def is_paused(task: Task) -> bool:
-    return not is_done(task) and task.paused
-
-
-def task_status(task: Task) -> str:
-    if is_done(task):
-        return "done"
-    if is_paused(task):
-        return "paused"
-    return "active"
+    return FALLBACK_OWNER_COLORS[
+        sum(ord(ch) for ch in owner) % len(FALLBACK_OWNER_COLORS)
+    ]
 
 
 def bubble_size_for_progress(progress: int) -> float:
     min_size = 14
     max_size = 30
     progress = max(0, min(100, int(progress)))
+
     if progress >= 100:
         return min_size
+
     return round(max_size - ((progress / 100) * (max_size - min_size)), 1)
 
 
-def detect_source_kind(source: str) -> str:
-    source = str(source).strip()
-    if source.startswith(("http://", "https://")):
-        return "api"
-
-    suffix = Path(source).suffix.lower()
-    if suffix == ".csv":
-        return "csv"
-    if suffix in {".xlsx", ".xls"}:
-        return "excel"
-    if suffix == ".json":
-        return "json"
-
-    raise ValueError(f"Unsupported source type: {source}")
-
-
-def extract_json_records(payload) -> List[dict]:
-    if isinstance(payload, list):
-        return payload
-
-    if isinstance(payload, dict):
-        for key in ("tasks", "data", "items", "results"):
-            if isinstance(payload.get(key), list):
-                return payload[key]
-
-    raise ValueError("JSON source must be a list of task objects or a dict containing tasks/data/items/results.")
-
-
-def read_source_to_frame(source: str) -> pd.DataFrame:
-    kind = detect_source_kind(source)
-
-    if kind == "csv":
-        return pd.read_csv(source)
-
-    if kind == "excel":
-        return pd.read_excel(source)
-
-    if kind == "json":
-        with open(source, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-        return pd.DataFrame(extract_json_records(payload))
-
-    response = requests.get(source, timeout=15)
-    response.raise_for_status()
-    return pd.DataFrame(extract_json_records(response.json()))
-
-
-def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    rename_map = {}
-    for col in df.columns:
-        clean = str(col).strip().replace("-", " ").replace("_", " ").lower()
-        rename_map[col] = COLUMN_ALIASES.get(clean, COLUMN_ALIASES.get(clean.replace(" ", ""), str(col).strip()))
-    return df.rename(columns=rename_map)
-
-
-def validate_and_clean(df: pd.DataFrame) -> pd.DataFrame:
-    df = standardize_columns(df).copy()
-
-    missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
-    if missing:
-        raise ValueError(f"Missing columns after normalization: {', '.join(missing)}")
-
-    if "paused" not in df.columns:
-        df["paused"] = False
-    if "status" not in df.columns:
-        df["status"] = ""
-
-    df["id"] = df["id"].astype(str).str.strip()
-    df["name"] = df["name"].astype(str).str.strip()
-    df["owner"] = df["owner"].apply(normalize_owner)
-
-    df["currentImpact"] = (
-        pd.to_numeric(df["currentImpact"], errors="coerce")
-        .fillna(0)
-        .clip(0, 100)
-        .round()
-        .astype(int)
-    )
-    df["futureImpact"] = (
-        pd.to_numeric(df["futureImpact"], errors="coerce")
-        .fillna(0)
-        .clip(0, 100)
-        .round()
-        .astype(int)
-    )
-    df["progress"] = (
-        pd.to_numeric(df["progress"], errors="coerce")
-        .fillna(0)
-        .clip(0, 100)
-        .round()
-        .astype(int)
-    )
-
-    df["status"] = df["status"].apply(normalize_status)
-
-    done_from_status = df["status"].eq("done")
-    paused_from_status = df["status"].eq("paused")
-
-    df["done"] = df["done"].apply(to_bool) | (df["progress"] >= 100) | done_from_status
-    df["paused"] = (~df["done"]) & (df["paused"].apply(to_paused_bool) | paused_from_status)
-
-    df = df[df["name"].ne("")].copy()
-
-    if df["id"].duplicated().any():
-        seen = {}
-        deduped = []
-        for value in df["id"]:
-            count = seen.get(value, 0) + 1
-            seen[value] = count
-            deduped.append(value if count == 1 else f"{value}-{count}")
-        df["id"] = deduped
-
-    return df[REQUIRED_COLUMNS + ["paused"]]
-
-
-def load_tasks(source: str) -> List[Task]:
-    df = validate_and_clean(read_source_to_frame(source))
-    return [
-        Task(
-            id=str(row["id"]),
-            name=str(row["name"]),
-            owner=str(row["owner"]),
-            currentImpact=int(row["currentImpact"]),
-            futureImpact=int(row["futureImpact"]),
-            progress=int(row["progress"]),
-            done=bool(row["done"]),
-            paused=bool(row["paused"]),
-        )
-        for _, row in df.iterrows()
-    ]
-
-
 def owner_order(tasks: List[Task]) -> List[str]:
-    seen = []
+    seen: List[str] = []
+
     for task in tasks:
         owner = normalize_owner(task.owner)
         if owner not in seen:
             seen.append(owner)
+
     return seen
 
 
 def owner_groups(tasks: List[Task]) -> Dict[str, List[Task]]:
     groups: Dict[str, List[Task]] = {owner: [] for owner in owner_order(tasks)}
+
     for task in tasks:
         groups.setdefault(normalize_owner(task.owner), []).append(task)
+
     return groups
 
 
 def active_index_by_owner(tasks: List[Task]) -> Dict[str, Dict[str, int]]:
     index_map: Dict[str, Dict[str, int]] = {}
+
     for owner, items in owner_groups(tasks).items():
         active = [task for task in items if task_status(task) == "active"]
         index_map[owner] = {task.id: index + 1 for index, task in enumerate(active)}
+
     return index_map
 
 
@@ -389,7 +193,7 @@ def owner_cards_html(tasks: List[Task]) -> str:
         </div>
         """
 
-    panels = []
+    panels: List[str] = []
 
     for owner in ordered_owners:
         items = groups[owner]
@@ -719,6 +523,20 @@ def build_dashboard_html(tasks: List[Task]) -> str:
       font-size: 12px;
       padding: 6px 0 2px 0;
     }}
+    .more-tasks {{
+      margin-top: 6px;
+      border-top: 1px dashed {BORDER};
+      padding-top: 8px;
+    }}
+    .more-summary {{
+      cursor: pointer;
+      color: {TEXT_MUTED3};
+      font-size: 12px;
+      margin-bottom: 10px;
+    }}
+    .more-tasks-wrap {{
+      margin-top: 10px;
+    }}
     @media (max-width: 1100px) {{
       .dashboard-grid {{
         grid-template-columns: 1fr;
@@ -826,9 +644,9 @@ def build_dashboard_html(tasks: List[Task]) -> str:
       const pausedPct = Math.round((pausedCount / total) * 100);
       const activePct = Math.round((activeCount / total) * 100);
 
-      doneValue.textContent = `${{donePct}}% (${{doneCount}}/${{TASKS.length}})`;
-      pausedValue.textContent = `${{pausedPct}}% (${{pausedCount}}/${{TASKS.length}})`;
-      activeValue.textContent = `${{activePct}}% (${{activeCount}}/${{TASKS.length}})`;
+      doneValue.textContent = `${donePct}% (${doneCount}/${TASKS.length})`;
+      pausedValue.textContent = `${pausedPct}% (${pausedCount}/${TASKS.length})`;
+      activeValue.textContent = `${activePct}% (${activeCount}/${TASKS.length})`;
 
       donePill.classList.toggle("active", activeFilter === "done");
       pausedPill.classList.toggle("active", activeFilter === "paused");
@@ -842,14 +660,14 @@ def build_dashboard_html(tasks: List[Task]) -> str:
       }} else if (task.status === "paused") {{
         statusLine = "Paused";
       }} else {{
-        statusLine = `Active ${{task.activeIndex}}/${{task.activeTotal}}`;
+        statusLine = `Active ${task.activeIndex}/${task.activeTotal}`;
       }}
 
-      return `<b>${{escapeHtml(task.name)}}</b><br>` +
-             `Owner: ${{escapeHtml(task.owner)}}<br>` +
-             `Current Impact: ${{task.currentImpact}}<br>` +
-             `Future Impact: ${{task.futureImpact}}<br>` +
-             `Progress: ${{task.progress}}%<br>` +
+      return `<b>${escapeHtml(task.name)}</b><br>` +
+             `Owner: ${escapeHtml(task.owner)}<br>` +
+             `Current Impact: ${task.currentImpact}<br>` +
+             `Future Impact: ${task.futureImpact}<br>` +
+             `Progress: ${task.progress}%<br>` +
              statusLine;
     }}
 
@@ -880,7 +698,7 @@ def build_dashboard_html(tasks: List[Task]) -> str:
         mode: "markers",
         text: visibleTasks.map(task => buildHoverText(task)),
         customdata: visibleTasks.map(task => task.status),
-        hovertemplate: "%{{text}}<extra></extra>",
+        hovertemplate: "%{text}<extra></extra>",
         showlegend: false,
         marker: {{
           size: visibleTasks.map(task => task.bubbleSize),
@@ -946,7 +764,7 @@ def build_dashboard_html(tasks: List[Task]) -> str:
           opacity: activeFilter !== "all" && activeFilter !== "done" ? 0.35 : 1,
         }},
         customdata: ["done"],
-        hovertemplate: `Done: ${{donePct}}% (${{doneCount}}/${{TASKS.length}})<extra></extra>`,
+        hovertemplate: `Done: ${donePct}% (${doneCount}/${TASKS.length})<extra></extra>`,
         showlegend: false,
       }};
 
@@ -960,7 +778,7 @@ def build_dashboard_html(tasks: List[Task]) -> str:
           opacity: activeFilter !== "all" && activeFilter !== "paused" ? 0.35 : 1,
         }},
         customdata: ["paused"],
-        hovertemplate: `Paused: ${{pausedPct}}% (${{pausedCount}}/${{TASKS.length}})<extra></extra>`,
+        hovertemplate: `Paused: ${pausedPct}% (${pausedCount}/${TASKS.length})<extra></extra>`,
         showlegend: false,
       }};
 
@@ -974,7 +792,7 @@ def build_dashboard_html(tasks: List[Task]) -> str:
           opacity: activeFilter !== "all" && activeFilter !== "active" ? 0.35 : 1,
         }},
         customdata: ["active"],
-        hovertemplate: `Active: ${{activePct}}% (${{activeCount}}/${{TASKS.length}})<extra></extra>`,
+        hovertemplate: `Active: ${activePct}% (${activeCount}/${TASKS.length})<extra></extra>`,
         showlegend: false,
       }};
 
@@ -1036,6 +854,8 @@ def build_dashboard_html(tasks: List[Task]) -> str:
 </body>
 </html>
 """
+
+
 st.markdown(
     """
     <style>
@@ -1058,8 +878,15 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
 st.title("Strategic Task Management")
 
-tasks = load_tasks(str(DEFAULT_SOURCE))
+try:
+    tasks = load_tasks(str(DEFAULT_SOURCE))
+except Exception as exc:
+    st.error(f"Could not load tasks from: {DEFAULT_SOURCE}")
+    st.exception(exc)
+    st.stop()
+
 html = build_dashboard_html(tasks)
 components.html(html, height=1900, scrolling=True)
