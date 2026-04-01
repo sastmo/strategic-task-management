@@ -1,11 +1,12 @@
 services:
   app:
     build: .
+    image: strategic-task-management:latest
     container_name: strategic-task-management
     ports:
-      - "127.0.0.1:8501:8501"
+      - "8501:8501"
     volumes:
-      - ./data:/app/data
+      - ./data:/app/data:ro
     environment:
       TASKS_SOURCE: /app/data/tasks.csv
     restart: unless-stopped
