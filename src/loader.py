@@ -5,13 +5,18 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import psycopg
 import requests
+from psycopg.rows import dict_row
 
 from src.schema import Task, validate_and_clean
 
 
 def detect_source_kind(source: str) -> str:
     source = str(source).strip()
+
+    if source.startswith(("postgresql://", "postgres://")):
+        return "postgres"
 
     if source.startswith(("http://", "https://")):
         return "api"
@@ -55,14 +60,17 @@ def read_source_to_frame(source: str) -> pd.DataFrame:
             payload = json.load(f)
         return pd.DataFrame(extract_json_records(payload))
 
-    response = requests.get(source, timeout=15)
-    response.raise_for_status()
-    return pd.DataFrame(extract_json_records(response.json()))
+    if kind == "api":
+        response = requests.get(source, timeout=15)
+        response.raise_for_status()
+        return pd.DataFrame(extract_json_records(response.json()))
+
+    raise ValueError(
+        "PostgreSQL sources should be read through load_tasks(), not read_source_to_frame()."
+    )
 
 
-def load_tasks(source: str) -> list[Task]:
-    df = validate_and_clean(read_source_to_frame(source))
-
+def frame_to_tasks(df: pd.DataFrame) -> list[Task]:
     return [
         Task(
             id=str(row["id"]),
@@ -76,3 +84,51 @@ def load_tasks(source: str) -> list[Task]:
         )
         for _, row in df.iterrows()
     ]
+
+
+def load_tasks_from_db(database_url: str) -> list[Task]:
+    query = """
+        SELECT
+            id,
+            name,
+            owner,
+            current_impact AS "currentImpact",
+            future_impact AS "futureImpact",
+            progress,
+            done,
+            paused
+        FROM tasks
+        ORDER BY owner, name
+    """
+
+    with psycopg.connect(database_url, row_factory=dict_row) as conn:
+        with conn.cursor() as cur:
+            cur.execute(query)
+            rows = cur.fetchall()
+
+    if not rows:
+        return []
+
+    return [
+        Task(
+            id=str(row["id"]),
+            name=str(row["name"]),
+            owner=str(row["owner"]),
+            currentImpact=int(row["currentImpact"]),
+            futureImpact=int(row["futureImpact"]),
+            progress=int(row["progress"]),
+            done=bool(row["done"]),
+            paused=bool(row["paused"]),
+        )
+        for row in rows
+    ]
+
+
+def load_tasks(source: str) -> list[Task]:
+    kind = detect_source_kind(source)
+
+    if kind == "postgres":
+        return load_tasks_from_db(source)
+
+    df = validate_and_clean(read_source_to_frame(source))
+    return frame_to_tasks(df)

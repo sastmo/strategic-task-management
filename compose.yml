@@ -1,14 +1,50 @@
 services:
+  db:
+    image: postgres:16
+    container_name: strategic-task-management-db
+    environment:
+      POSTGRES_DB: strategic_tasks
+      POSTGRES_USER: stm_user
+      POSTGRES_PASSWORD: stm_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stm_user -d strategic_tasks"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  sync:
+    build: .
+    image: strategic-task-management:latest
+    container_name: strategic-task-management-sync
+    command: python -m src.auto_sync
+    volumes:
+      - ./data:/app/data:ro
+    environment:
+      DATABASE_URL: postgresql://stm_user:stm_password@db:5432/strategic_tasks
+      SYNC_SOURCE: /app/data/tasks.csv
+      SYNC_INTERVAL_SECONDS: 60
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   app:
     build: .
     image: strategic-task-management:latest
     container_name: strategic-task-management
     ports:
       - "8501:8501"
-    volumes:
-      - ./data:/app/data:ro
     environment:
-      TASKS_SOURCE: /app/data/tasks.csv
+      TASKS_SOURCE: postgresql://stm_user:stm_password@db:5432/strategic_tasks
+      APP_REFRESH_MS: 60000
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
@@ -16,3 +52,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+
+volumes:
+  postgres_data:

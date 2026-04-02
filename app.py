@@ -19,9 +19,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# =========================
-# Visual configuration
-# =========================
 BG = "#161a20"
 PANEL = "#1d2229"
 PANEL_2 = "#20262e"
@@ -50,11 +47,9 @@ FALLBACK_OWNER_COLORS = [
     "#60a5fa",
 ]
 
-DEFAULT_SOURCE = Path(
-    os.getenv(
-        "TASKS_SOURCE",
-        str(Path(__file__).resolve().parent / "data" / "tasks.csv"),
-    )
+DEFAULT_SOURCE = os.getenv(
+    "TASKS_SOURCE",
+    str(Path(__file__).resolve().parent / "data" / "tasks.csv"),
 )
 
 
@@ -626,7 +621,9 @@ def build_dashboard_html(tasks: List[Task]) -> str:
 
     function getVisibleTasks() {{
       if (activeFilter === "all") return TASKS;
-      return TASKS.filter(task => task.status === activeFilter);
+      return TASKS.filter(function(task) {{
+        return task.status === activeFilter;
+      }});
     }}
 
     function toggleFilter(nextFilter) {{
@@ -635,18 +632,18 @@ def build_dashboard_html(tasks: List[Task]) -> str:
     }}
 
     function updateStatusPills() {{
-      const doneCount = TASKS.filter(task => task.status === "done").length;
-      const pausedCount = TASKS.filter(task => task.status === "paused").length;
-      const activeCount = TASKS.filter(task => task.status === "active").length;
+      const doneCount = TASKS.filter(function(task) {{ return task.status === "done"; }}).length;
+      const pausedCount = TASKS.filter(function(task) {{ return task.status === "paused"; }}).length;
+      const activeCount = TASKS.filter(function(task) {{ return task.status === "active"; }}).length;
 
       const total = TASKS.length || 1;
       const donePct = Math.round((doneCount / total) * 100);
       const pausedPct = Math.round((pausedCount / total) * 100);
       const activePct = Math.round((activeCount / total) * 100);
 
-      doneValue.textContent = `${donePct}% (${doneCount}/${TASKS.length})`;
-      pausedValue.textContent = `${pausedPct}% (${pausedCount}/${TASKS.length})`;
-      activeValue.textContent = `${activePct}% (${activeCount}/${TASKS.length})`;
+      doneValue.textContent = donePct + "% (" + doneCount + "/" + TASKS.length + ")";
+      pausedValue.textContent = pausedPct + "% (" + pausedCount + "/" + TASKS.length + ")";
+      activeValue.textContent = activePct + "% (" + activeCount + "/" + TASKS.length + ")";
 
       donePill.classList.toggle("active", activeFilter === "done");
       pausedPill.classList.toggle("active", activeFilter === "paused");
@@ -660,49 +657,51 @@ def build_dashboard_html(tasks: List[Task]) -> str:
       }} else if (task.status === "paused") {{
         statusLine = "Paused";
       }} else {{
-        statusLine = `Active ${task.activeIndex}/${task.activeTotal}`;
+        statusLine = "Active " + task.activeIndex + "/" + task.activeTotal;
       }}
 
-      return `<b>${escapeHtml(task.name)}</b><br>` +
-             `Owner: ${escapeHtml(task.owner)}<br>` +
-             `Current Impact: ${task.currentImpact}<br>` +
-             `Future Impact: ${task.futureImpact}<br>` +
-             `Progress: ${task.progress}%<br>` +
+      return "<b>" + escapeHtml(task.name) + "</b><br>" +
+             "Owner: " + escapeHtml(task.owner) + "<br>" +
+             "Current Impact: " + task.currentImpact + "<br>" +
+             "Future Impact: " + task.futureImpact + "<br>" +
+             "Progress: " + task.progress + "%<br>" +
              statusLine;
     }}
 
     function renderImpactChart() {{
       const visibleTasks = getVisibleTasks();
-      const activeTasks = visibleTasks.filter(task => task.status === "active");
+      const activeTasks = visibleTasks.filter(function(task) {{
+        return task.status === "active";
+      }});
 
       const haloTrace = {{
-        x: activeTasks.map(task => task.currentImpact),
-        y: activeTasks.map(task => task.futureImpact),
+        x: activeTasks.map(function(task) {{ return task.currentImpact; }}),
+        y: activeTasks.map(function(task) {{ return task.futureImpact; }}),
         mode: "markers",
         hoverinfo: "skip",
         showlegend: false,
         marker: {{
-          size: activeTasks.map(task => task.bubbleSize + 8),
-          color: activeTasks.map(task => task.ownerColor),
+          size: activeTasks.map(function(task) {{ return task.bubbleSize + 8; }}),
+          color: activeTasks.map(function(task) {{ return task.ownerColor; }}),
           opacity: 0.22,
           line: {{
             width: 2,
-            color: activeTasks.map(task => task.ownerColor),
+            color: activeTasks.map(function(task) {{ return task.ownerColor; }}),
           }},
         }},
       }};
 
       const pointTrace = {{
-        x: visibleTasks.map(task => task.currentImpact),
-        y: visibleTasks.map(task => task.futureImpact),
+        x: visibleTasks.map(function(task) {{ return task.currentImpact; }}),
+        y: visibleTasks.map(function(task) {{ return task.futureImpact; }}),
         mode: "markers",
-        text: visibleTasks.map(task => buildHoverText(task)),
-        customdata: visibleTasks.map(task => task.status),
-        hovertemplate: "%{text}<extra></extra>",
+        text: visibleTasks.map(function(task) {{ return buildHoverText(task); }}),
+        customdata: visibleTasks.map(function(task) {{ return task.status; }}),
+        hovertemplate: "%{{text}}<extra></extra>",
         showlegend: false,
         marker: {{
-          size: visibleTasks.map(task => task.bubbleSize),
-          color: visibleTasks.map(task => task.pointColor),
+          size: visibleTasks.map(function(task) {{ return task.bubbleSize; }}),
+          color: visibleTasks.map(function(task) {{ return task.pointColor; }}),
           line: {{ width: 0 }},
         }},
       }};
@@ -745,14 +744,14 @@ def build_dashboard_html(tasks: List[Task]) -> str:
     }}
 
     function renderPortfolioChart() {{
-      const doneCount = TASKS.filter(task => task.status === "done").length;
-      const pausedCount = TASKS.filter(task => task.status === "paused").length;
-      const activeCount = TASKS.filter(task => task.status === "active").length;
+      const doneCount = TASKS.filter(function(task) {{ return task.status === "done"; }}).length;
+      const pausedCount = TASKS.filter(function(task) {{ return task.status === "paused"; }}).length;
+      const activeCount = TASKS.filter(function(task) {{ return task.status === "active"; }}).length;
 
       const total = TASKS.length || 1;
       const donePct = Math.round((doneCount / total) * 100);
       const pausedPct = Math.round((pausedCount / total) * 100);
-      const activePct = 100 - donePct - pausedPct;
+      const activePct = Math.max(0, 100 - donePct - pausedPct);
 
       const doneTrace = {{
         x: [donePct],
@@ -764,7 +763,7 @@ def build_dashboard_html(tasks: List[Task]) -> str:
           opacity: activeFilter !== "all" && activeFilter !== "done" ? 0.35 : 1,
         }},
         customdata: ["done"],
-        hovertemplate: `Done: ${donePct}% (${doneCount}/${TASKS.length})<extra></extra>`,
+        hovertemplate: "Done: " + donePct + "% (" + doneCount + "/" + TASKS.length + ")<extra></extra>",
         showlegend: false,
       }};
 
@@ -778,7 +777,7 @@ def build_dashboard_html(tasks: List[Task]) -> str:
           opacity: activeFilter !== "all" && activeFilter !== "paused" ? 0.35 : 1,
         }},
         customdata: ["paused"],
-        hovertemplate: `Paused: ${pausedPct}% (${pausedCount}/${TASKS.length})<extra></extra>`,
+        hovertemplate: "Paused: " + pausedPct + "% (" + pausedCount + "/" + TASKS.length + ")<extra></extra>",
         showlegend: false,
       }};
 
@@ -792,7 +791,7 @@ def build_dashboard_html(tasks: List[Task]) -> str:
           opacity: activeFilter !== "all" && activeFilter !== "active" ? 0.35 : 1,
         }},
         customdata: ["active"],
-        hovertemplate: `Active: ${activePct}% (${activeCount}/${TASKS.length})<extra></extra>`,
+        hovertemplate: "Active: " + activePct + "% (" + activeCount + "/" + TASKS.length + ")<extra></extra>",
         showlegend: false,
       }};
 
@@ -855,7 +854,6 @@ def build_dashboard_html(tasks: List[Task]) -> str:
 </html>
 """
 
-
 st.markdown(
     """
     <style>
@@ -882,7 +880,7 @@ st.markdown(
 st.title("Strategic Task Management")
 
 try:
-    tasks = load_tasks(str(DEFAULT_SOURCE))
+    tasks = load_tasks(DEFAULT_SOURCE)
 except Exception as exc:
     st.error(f"Could not load tasks from: {DEFAULT_SOURCE}")
     st.exception(exc)
