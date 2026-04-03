@@ -1,0 +1,4 @@
+id,name,owner,currentImpact,futureImpact,progress,done,paused
+t1,Stabilize Simulator API,team1,90,40,65,false,false
+t2,AI Mission Planner,team2,35,95,50,false,false
+t3,Pricing Redesign,team3,80,85,30,false,true
