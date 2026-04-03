@@ -12,6 +12,10 @@ from psycopg.rows import dict_row
 from src.schema import Task, validate_and_clean
 
 
+SourceSpec = str | dict[str, Any]
+SourceList = list[SourceSpec]
+
+
 def detect_source_kind(source: str) -> str:
     source = str(source).strip()
 
@@ -46,28 +50,182 @@ def extract_json_records(payload: Any) -> list[dict]:
     )
 
 
-def read_source_to_frame(source: str) -> pd.DataFrame:
-    kind = detect_source_kind(source)
+def derive_source_name(source_value: str) -> str:
+    source_value = str(source_value).strip()
+
+    if source_value.startswith(("http://", "https://")):
+        return source_value.rstrip("/").split("/")[-1] or "api_source"
+
+    path = Path(source_value)
+    return path.stem or path.name or "source"
+
+
+def normalize_source_spec(source: SourceSpec) -> dict[str, Any]:
+    if isinstance(source, str):
+        return {
+            "source": source,
+            "source_name": derive_source_name(source),
+        }
+
+    if isinstance(source, dict):
+        if "source" in source:
+            source_value = source["source"]
+        elif "path" in source:
+            source_value = source["path"]
+        elif "url" in source:
+            source_value = source["url"]
+        else:
+            raise ValueError(
+                "Source spec dict must include one of: source, path, url."
+            )
+
+        spec = dict(source)
+        spec["source"] = str(source_value)
+        spec.setdefault("source_name", derive_source_name(str(source_value)))
+        return spec
+
+    raise TypeError("Source must be a string path/URL or a dict source spec.")
+
+
+def add_source_metadata(
+    df: pd.DataFrame,
+    *,
+    source_name: str,
+    source_kind: str,
+    source_sheet: str | None = None,
+) -> pd.DataFrame:
+    df = df.copy()
+    df["_source_name"] = source_name
+    df["_source_kind"] = source_kind
+    df["_source_sheet"] = source_sheet or ""
+    return df
+
+
+def read_csv_source(source: str) -> pd.DataFrame:
+    return pd.read_csv(source)
+
+
+def read_json_source(source: str) -> pd.DataFrame:
+    with open(source, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return pd.DataFrame(extract_json_records(payload))
+
+
+def read_api_source(source: str) -> pd.DataFrame:
+    response = requests.get(source, timeout=15)
+    response.raise_for_status()
+    return pd.DataFrame(extract_json_records(response.json()))
+
+
+def read_excel_source(spec: dict[str, Any]) -> list[pd.DataFrame]:
+    source = spec["source"]
+    source_name = spec["source_name"]
+    all_sheets = bool(spec.get("all_sheets", False))
+    sheet_name = spec.get("sheet_name")
+
+    frames: list[pd.DataFrame] = []
+
+    if all_sheets:
+        workbook = pd.read_excel(source, sheet_name=None)
+        for sheet, df in workbook.items():
+            frames.append(
+                add_source_metadata(
+                    df,
+                    source_name=source_name,
+                    source_kind="excel",
+                    source_sheet=str(sheet),
+                )
+            )
+        return frames
+
+    if isinstance(sheet_name, list):
+        for sheet in sheet_name:
+            df = pd.read_excel(source, sheet_name=sheet)
+            frames.append(
+                add_source_metadata(
+                    df,
+                    source_name=source_name,
+                    source_kind="excel",
+                    source_sheet=str(sheet),
+                )
+            )
+        return frames
+
+    df = pd.read_excel(source, sheet_name=sheet_name if sheet_name is not None else 0)
+    frames.append(
+        add_source_metadata(
+            df,
+            source_name=source_name,
+            source_kind="excel",
+            source_sheet=str(sheet_name) if sheet_name is not None else "0",
+        )
+    )
+    return frames
+
+
+def read_source_spec_to_frames(source: SourceSpec) -> list[pd.DataFrame]:
+    spec = normalize_source_spec(source)
+    source_value = spec["source"]
+    source_name = spec["source_name"]
+    kind = detect_source_kind(source_value)
+
+    if kind == "postgres":
+        raise ValueError(
+            "PostgreSQL sources should be read through load_tasks_from_db(), not read_source_spec_to_frames()."
+        )
 
     if kind == "csv":
-        return pd.read_csv(source)
-
-    if kind == "excel":
-        return pd.read_excel(source)
+        df = read_csv_source(source_value)
+        return [
+            add_source_metadata(
+                df,
+                source_name=source_name,
+                source_kind="csv",
+            )
+        ]
 
     if kind == "json":
-        with open(source, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-        return pd.DataFrame(extract_json_records(payload))
+        df = read_json_source(source_value)
+        return [
+            add_source_metadata(
+                df,
+                source_name=source_name,
+                source_kind="json",
+            )
+        ]
 
     if kind == "api":
-        response = requests.get(source, timeout=15)
-        response.raise_for_status()
-        return pd.DataFrame(extract_json_records(response.json()))
+        df = read_api_source(source_value)
+        return [
+            add_source_metadata(
+                df,
+                source_name=source_name,
+                source_kind="api",
+            )
+        ]
 
-    raise ValueError(
-        "PostgreSQL sources should be read through load_tasks(), not read_source_to_frame()."
-    )
+    if kind == "excel":
+        return read_excel_source(spec)
+
+    raise ValueError(f"Unsupported source kind: {kind}")
+
+
+def read_sources_to_frame(sources: SourceSpec | SourceList) -> pd.DataFrame:
+    if isinstance(sources, list):
+        frames: list[pd.DataFrame] = []
+        for source in sources:
+            frames.extend(read_source_spec_to_frames(source))
+    else:
+        frames = read_source_spec_to_frames(sources)
+
+    if not frames:
+        return pd.DataFrame()
+
+    return pd.concat(frames, ignore_index=True)
+
+
+def read_source_to_frame(source: SourceSpec | SourceList) -> pd.DataFrame:
+    return read_sources_to_frame(source)
 
 
 def frame_to_tasks(df: pd.DataFrame) -> list[Task]:
@@ -124,10 +282,8 @@ def load_tasks_from_db(database_url: str) -> list[Task]:
     ]
 
 
-def load_tasks(source: str) -> list[Task]:
-    kind = detect_source_kind(source)
-
-    if kind == "postgres":
+def load_tasks(source: SourceSpec | SourceList) -> list[Task]:
+    if isinstance(source, str) and detect_source_kind(source) == "postgres":
         return load_tasks_from_db(source)
 
     df = validate_and_clean(read_source_to_frame(source))

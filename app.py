@@ -11,6 +11,7 @@ import streamlit.components.v1 as components
 
 from src.loader import load_tasks
 from src.schema import Task, normalize_owner, task_status
+from streamlit_autorefresh import st_autorefresh
 
 
 st.set_page_config(
@@ -878,6 +879,11 @@ st.markdown(
 )
 
 st.title("Strategic Task Management")
+
+st_autorefresh(
+    interval=int(os.getenv("APP_REFRESH_MS", "60000")),
+    key="tasks_refresh",
+)
 
 try:
     tasks = load_tasks(DEFAULT_SOURCE)

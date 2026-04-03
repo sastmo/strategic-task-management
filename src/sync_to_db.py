@@ -42,6 +42,7 @@ def ensure_schema(conn: psycopg.Connection) -> None:
 
 def sync_to_db(source: str, database_url: str) -> None:
     df = validate_and_clean(read_source_to_frame(source))
+    incoming_ids = [str(value) for value in df["id"].tolist()]
 
     with psycopg.connect(database_url) as conn:
         ensure_schema(conn)
@@ -84,10 +85,14 @@ def sync_to_db(source: str, database_url: str) -> None:
                     ),
                 )
 
+            if incoming_ids:
+                cur.execute(
+                    "DELETE FROM tasks WHERE NOT (id = ANY(%s))",
+                    (incoming_ids,),
+                )
+            else:
+                cur.execute("DELETE FROM tasks")
+
         conn.commit()
 
     print(f"Synced {len(df)} task(s) into PostgreSQL.")
-
-
-if __name__ == "__main__":
-    sync_to_db(DEFAULT_SYNC_SOURCE, DATABASE_URL)

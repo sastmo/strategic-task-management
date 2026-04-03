@@ -21,18 +21,21 @@ services:
     build: .
     image: strategic-task-management:latest
     container_name: strategic-task-management-sync
-    command: python -m src.auto_sync
+    entrypoint: ["python", "-u", "-m", "src.auto_sync"]
     volumes:
       - ./data:/app/data:ro
     environment:
       DATABASE_URL: postgresql://stm_user:stm_password@db:5432/strategic_tasks
       SYNC_SOURCE: /app/data/tasks.csv
       SYNC_INTERVAL_SECONDS: 60
+      PYTHONUNBUFFERED: "1"
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
-
+    healthcheck:
+      disable: true
+      
   app:
     build: .
     image: strategic-task-management:latest
@@ -41,17 +44,10 @@ services:
       - "8501:8501"
     environment:
       TASKS_SOURCE: postgresql://stm_user:stm_password@db:5432/strategic_tasks
-      APP_REFRESH_MS: 60000
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
 
 volumes:
   postgres_data:
