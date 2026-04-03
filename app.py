@@ -1,24 +1,21 @@
 from __future__ import annotations
 
 from pathlib import Path
-import os
 
 import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_autorefresh import st_autorefresh
 
-from src.dashboard import STREAMLIT_CHROME_STYLE, build_dashboard_html
+from src.application.settings import load_app_settings
 from src.loader import load_tasks
-
-
-DEFAULT_SOURCE = os.getenv(
-    "TASKS_SOURCE",
-    str(Path(__file__).resolve().parent / "data" / "tasks.csv"),
-)
-DASHBOARD_HEIGHT = int(os.getenv("APP_DASHBOARD_HEIGHT", "1900"))
+from src.presentation.dashboard import STREAMLIT_CHROME_STYLE, build_dashboard_html
 
 
 def main() -> None:
+    settings = load_app_settings(
+        str(Path(__file__).resolve().parent / "data" / "tasks.csv")
+    )
+
     st.set_page_config(
         page_title="Strategic Task Management",
         layout="wide",
@@ -29,20 +26,20 @@ def main() -> None:
     st.title("Strategic Task Management")
 
     st_autorefresh(
-        interval=int(os.getenv("APP_REFRESH_MS", "60000")),
+        interval=settings.refresh_ms,
         key="tasks_refresh",
     )
 
     try:
-        tasks = load_tasks(DEFAULT_SOURCE)
+        tasks = load_tasks(settings.tasks_source)
     except Exception as exc:
-        st.error(f"Could not load tasks from: {DEFAULT_SOURCE}")
+        st.error(f"Could not load tasks from: {settings.tasks_source}")
         st.exception(exc)
         st.stop()
 
     components.html(
         build_dashboard_html(tasks),
-        height=DASHBOARD_HEIGHT,
+        height=settings.dashboard_height,
         scrolling=True,
     )
 
