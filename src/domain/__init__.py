@@ -1,3 +1,14 @@
+from src.domain.identity import (
+    AppRole,
+    AuthState,
+    AuthenticatedUser,
+    PermissionSet,
+    build_user_key,
+    highest_role,
+    normalize_app_role,
+    normalize_email,
+    normalize_role_collection,
+)
 from src.domain.tasks import (
     SUPPORTED_UNION_MODES,
     Task,
@@ -17,14 +28,23 @@ from src.domain.tasks import (
 )
 
 __all__ = [
+    "AppRole",
+    "AuthState",
+    "AuthenticatedUser",
+    "PermissionSet",
     "SUPPORTED_UNION_MODES",
     "Task",
     "TaskStatus",
     "UnionMode",
     "build_business_key",
+    "build_user_key",
+    "highest_role",
     "is_done",
     "is_paused",
+    "normalize_app_role",
+    "normalize_email",
     "normalize_owner",
+    "normalize_role_collection",
     "normalize_status",
     "normalize_union_mode",
     "slugify",

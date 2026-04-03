@@ -8,6 +8,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from src.domain.tasks import Task
+from src.infrastructure.user_repository import AUTH_SCHEMA_STATEMENTS
 
 
 class TaskWarehouseStore:
@@ -19,7 +20,6 @@ class TaskWarehouseStore:
             "CREATE SCHEMA IF NOT EXISTS ops",
             "CREATE SCHEMA IF NOT EXISTS staging",
             "CREATE SCHEMA IF NOT EXISTS warehouse",
-            "CREATE SCHEMA IF NOT EXISTS app",
             """
             CREATE TABLE IF NOT EXISTS ops.ingestion_runs (
                 run_id BIGSERIAL PRIMARY KEY,
@@ -38,26 +38,6 @@ class TaskWarehouseStore:
                 deleted_count INTEGER NOT NULL DEFAULT 0,
                 unchanged_count INTEGER NOT NULL DEFAULT 0,
                 error_message TEXT
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS app.event_log (
-                event_id BIGSERIAL PRIMARY KEY,
-                event_type TEXT NOT NULL,
-                actor_type TEXT NOT NULL DEFAULT 'system',
-                actor_id TEXT,
-                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS app.user_activity_log (
-                activity_id BIGSERIAL PRIMARY KEY,
-                user_id TEXT,
-                session_id TEXT,
-                event_name TEXT NOT NULL,
-                payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-                occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
             """,
             """
@@ -164,14 +144,6 @@ class TaskWarehouseStore:
             ON ops.ingestion_runs (status, started_at DESC)
             """,
             """
-            CREATE INDEX IF NOT EXISTS idx_event_log_type
-            ON app.event_log (event_type, created_at DESC)
-            """,
-            """
-            CREATE INDEX IF NOT EXISTS idx_user_activity_user
-            ON app.user_activity_log (user_id, occurred_at DESC)
-            """,
-            """
             CREATE INDEX IF NOT EXISTS idx_task_records_run
             ON staging.task_records (run_id, business_key)
             """,
@@ -254,6 +226,7 @@ class TaskWarehouseStore:
             JOIN latest_run lr ON lr.run_id = s.run_id
             """,
         ]
+        statements[3:3] = list(AUTH_SCHEMA_STATEMENTS)
 
         with self.connection.cursor() as cursor:
             for statement in statements:

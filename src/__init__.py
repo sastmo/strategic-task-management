@@ -8,17 +8,19 @@ __all__ = [
     "build_dashboard_html",
     "load_task_batch",
     "load_tasks",
+    "resolve_request_authorization",
     "run_auto_sync",
     "sync_to_database",
     "sync_to_db",
     "validate_and_clean",
 ]
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 
 if TYPE_CHECKING:
     from src.domain.tasks import Task
+    from src.application.auth_service import resolve_request_authorization
     from src.presentation.dashboard import build_dashboard_html
     from src.application.auto_sync import run_auto_sync
     from src.application.task_sync import sync_to_database
@@ -33,6 +35,7 @@ def __getattr__(name: str) -> Any:
         "build_dashboard_html": ("src.presentation.dashboard", "build_dashboard_html"),
         "load_task_batch": ("src.application.task_workflow", "load_task_batch"),
         "load_tasks": ("src.application.task_workflow", "load_tasks"),
+        "resolve_request_authorization": ("src.application.auth_service", "resolve_request_authorization"),
         "run_auto_sync": ("src.application.auto_sync", "run_auto_sync"),
         "sync_to_database": ("src.application.task_sync", "sync_to_database"),
         "sync_to_db": ("src.sync_to_db", "sync_to_db"),

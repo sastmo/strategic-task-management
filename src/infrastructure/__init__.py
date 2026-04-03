@@ -13,16 +13,24 @@ __all__ = [
     "SourceList",
     "SourceSpec",
     "TaskSourceConfig",
+    "UserAccessRepository",
     "TaskWarehouseStore",
+    "build_app_service_login_url",
+    "build_app_service_logout_url",
+    "decode_client_principal",
     "detect_source_kind",
     "empty_current_frame",
     "empty_staged_frame",
     "expand_source_specs",
     "frame_to_tasks",
+    "get_default_azure_credential",
+    "has_azure_identity_support",
     "is_database_url",
     "load_tasks_from_database",
+    "open_user_access_repository",
     "normalize_task_frame",
     "parse_source_config",
+    "parse_app_service_user",
     "read_source_spec_to_frames",
     "resolve_current_frame",
 ]
@@ -53,6 +61,20 @@ if TYPE_CHECKING:
         resolve_current_frame,
     )
     from src.infrastructure.task_store import TaskWarehouseStore, load_tasks_from_database
+    from src.infrastructure.auth.app_service import (
+        build_app_service_login_url,
+        build_app_service_logout_url,
+        decode_client_principal,
+        parse_app_service_user,
+    )
+    from src.infrastructure.azure.credentials import (
+        get_default_azure_credential,
+        has_azure_identity_support,
+    )
+    from src.infrastructure.user_repository import (
+        UserAccessRepository,
+        open_user_access_repository,
+    )
 
 
 def __getattr__(name: str) -> Any:
@@ -76,6 +98,14 @@ def __getattr__(name: str) -> Any:
         "frame_to_tasks": ("src.infrastructure.task_frames", "frame_to_tasks"),
         "normalize_task_frame": ("src.infrastructure.task_frames", "normalize_task_frame"),
         "resolve_current_frame": ("src.infrastructure.task_frames", "resolve_current_frame"),
+        "build_app_service_login_url": ("src.infrastructure.auth.app_service", "build_app_service_login_url"),
+        "build_app_service_logout_url": ("src.infrastructure.auth.app_service", "build_app_service_logout_url"),
+        "decode_client_principal": ("src.infrastructure.auth.app_service", "decode_client_principal"),
+        "parse_app_service_user": ("src.infrastructure.auth.app_service", "parse_app_service_user"),
+        "get_default_azure_credential": ("src.infrastructure.azure.credentials", "get_default_azure_credential"),
+        "has_azure_identity_support": ("src.infrastructure.azure.credentials", "has_azure_identity_support"),
+        "UserAccessRepository": ("src.infrastructure.user_repository", "UserAccessRepository"),
+        "open_user_access_repository": ("src.infrastructure.user_repository", "open_user_access_repository"),
         "TaskWarehouseStore": ("src.infrastructure.task_store", "TaskWarehouseStore"),
         "load_tasks_from_database": ("src.infrastructure.task_store", "load_tasks_from_database"),
     }

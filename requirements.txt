@@ -5,3 +5,4 @@ openpyxl
 psycopg[binary]
 streamlit-autorefresh
 requests
+azure-identity
