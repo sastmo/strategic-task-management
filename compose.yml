@@ -26,8 +26,10 @@ services:
       - ./data:/app/data:ro
     environment:
       DATABASE_URL: postgresql://stm_user:stm_password@db:5432/strategic_tasks
-      SYNC_SOURCE: /app/data/tasks.csv
-      SYNC_INTERVAL_SECONDS: 60
+      SYNC_SOURCE: /app/data
+      SYNC_POLL_SECONDS: 30
+      SYNC_REFRESH_SECONDS: 1800
+      SYNC_RETRY_SECONDS: 120
       PYTHONUNBUFFERED: "1"
     depends_on:
       db:

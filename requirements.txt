@@ -4,3 +4,4 @@ plotly
 openpyxl
 psycopg[binary]
 streamlit-autorefresh
+requests
