@@ -1,0 +1,600 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Strategic Task Management</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      background: __BG__;
+      color: __TEXT__;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    .wrap {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 22px;
+      box-sizing: border-box;
+    }
+    .panel {
+      background: __PANEL__;
+      border: 1px solid __BORDER__;
+      border-radius: 18px;
+      padding: 18px;
+      box-sizing: border-box;
+    }
+    .legend-panel {
+      margin-bottom: 16px;
+    }
+    .panel-title {
+      margin: 0 0 8px 0;
+      font-size: 18px;
+      font-weight: 700;
+      color: __TEXT__;
+    }
+    .panel-subtitle {
+      margin: 0;
+      font-size: 13px;
+      color: __TEXT_MUTED__;
+    }
+    .role-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 12px;
+      color: __TEXT_MUTED3__;
+      font-size: 13px;
+    }
+    .role-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .role-swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 4px;
+      display: inline-block;
+    }
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(340px, 0.95fr);
+      gap: 16px;
+      align-items: start;
+    }
+    #impactChart {
+      height: 520px;
+    }
+    #portfolioChart {
+      height: 180px;
+    }
+    .chart-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .filter-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid __BORDER__;
+      background: __PANEL_2__;
+      color: __TEXT_MUTED3__;
+      font-size: 12px;
+    }
+    .filter-pill strong {
+      color: __TEXT__;
+      font-weight: 700;
+    }
+    .clear-btn {
+      border: 1px solid __BORDER__;
+      background: __PANEL_2__;
+      color: __TEXT__;
+      padding: 8px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .clear-btn:hover {
+      border-color: #475569;
+    }
+    .status-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .status-pill {
+      width: 100%;
+      border: 1px solid __BORDER__;
+      background: __PANEL_2__;
+      color: __TEXT__;
+      border-radius: 14px;
+      padding: 12px 14px;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+    }
+    .status-pill:hover {
+      border-color: #64748b;
+      transform: translateY(-1px);
+    }
+    .status-pill.active {
+      border-color: #cbd5e1;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.08) inset;
+    }
+    .status-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: __TEXT_MUTED3__;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+    .status-value {
+      font-size: 15px;
+      font-weight: 700;
+      color: __TEXT__;
+    }
+    .section-title {
+      margin: 32px 0 10px 2px;
+      font-size: 24px;
+      font-weight: 700;
+      color: __TEXT__;
+    }
+    .owners-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    .owner-panel {
+      background: __PANEL__;
+      border: 1px solid __BORDER__;
+      border-radius: 16px;
+      padding: 14px 14px 10px 14px;
+    }
+    .owner-summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      position: relative;
+      padding-right: 20px;
+    }
+    .owner-summary::-webkit-details-marker {
+      display: none;
+    }
+    .owner-summary::after {
+      content: "▸";
+      position: absolute;
+      right: 0;
+      top: 0;
+      color: __TEXT_MUTED2__;
+      font-size: 14px;
+      line-height: 1;
+    }
+    details[open] > .owner-summary::after {
+      content: "▾";
+    }
+    .owner-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: __TEXT__;
+    }
+    .owner-right {
+      text-align: right;
+      padding-right: 6px;
+    }
+    .owner-overall {
+      font-size: 13px;
+      font-weight: 700;
+      color: __TEXT_MUTED3__;
+    }
+    .owner-count {
+      font-size: 12px;
+      color: __TEXT_MUTED2__;
+      margin-top: 3px;
+    }
+    .progress-track {
+      height: 8px;
+      background: #29303a;
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 10px 0 12px 0;
+    }
+    .progress-track > i {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+    }
+    .owner-track {
+      margin-top: 12px;
+    }
+    .task-card {
+      background: __PANEL_2__;
+      border: 1px solid __BORDER__;
+      border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .task-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .task-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: __TEXT__;
+    }
+    .task-sub {
+      font-size: 12px;
+      color: __TEXT_MUTED2__;
+      margin-top: 2px;
+    }
+    .task-progress {
+      font-size: 13px;
+      font-weight: 700;
+      color: __TEXT_MUTED3__;
+      white-space: nowrap;
+    }
+    .task-status {
+      font-size: 11px;
+      color: __TEXT_MUTED3__;
+      margin-top: 2px;
+    }
+    .empty-state {
+      color: __TEXT_MUTED2__;
+      font-size: 12px;
+      padding: 6px 0 2px 0;
+    }
+    .more-tasks {
+      margin-top: 6px;
+      border-top: 1px dashed __BORDER__;
+      padding-top: 8px;
+    }
+    .more-summary {
+      cursor: pointer;
+      color: __TEXT_MUTED3__;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    .more-tasks-wrap {
+      margin-top: 10px;
+    }
+    @media (max-width: 1100px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel legend-panel">
+      <div class="panel-title">Current vs Future Impact Map</div>
+      <p class="panel-subtitle">X-axis: Current Offering. Y-axis: Future Offering.</p>
+      <div class="role-legend">
+        __ROLE_LEGEND__
+      </div>
+    </div>
+
+    <div class="dashboard-grid">
+      <div class="panel">
+        <div class="chart-toolbar">
+          <div class="filter-pill">Filter: <strong id="activeFilterLabel">All tasks</strong></div>
+          <button id="clearFilterBtn" class="clear-btn" type="button">Clear filter</button>
+        </div>
+        <div class="panel-title">Strategic Positioning</div>
+        <div id="impactChart"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Completion Distribution</div>
+        <div id="portfolioChart"></div>
+        <div class="status-row">
+          <button id="donePill" class="status-pill" type="button">
+            <div class="status-label"><span class="status-dot" style="background:__DONE_GREEN__"></span>Done</div>
+            <div id="doneValue" class="status-value">-</div>
+          </button>
+          <button id="pausedPill" class="status-pill" type="button">
+            <div class="status-label"><span class="status-dot" style="background:__PAUSED_GRAY__"></span>Paused</div>
+            <div id="pausedValue" class="status-value">-</div>
+          </button>
+          <button id="activePill" class="status-pill" type="button">
+            <div class="status-label"><span class="status-dot" style="background:__ACTIVE_BLUE__"></span>Active</div>
+            <div id="activeValue" class="status-value">-</div>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Owner Views</div>
+    <div class="owners-grid">
+      __OWNERS_HTML__
+    </div>
+  </div>
+
+  <script>
+    const TASKS = __TASKS_JSON__;
+
+    let activeFilter = "all";
+
+    const impactEl = document.getElementById("impactChart");
+    const portfolioEl = document.getElementById("portfolioChart");
+    const activeFilterLabelEl = document.getElementById("activeFilterLabel");
+    const clearFilterBtn = document.getElementById("clearFilterBtn");
+
+    const donePill = document.getElementById("donePill");
+    const pausedPill = document.getElementById("pausedPill");
+    const activePill = document.getElementById("activePill");
+
+    const doneValue = document.getElementById("doneValue");
+    const pausedValue = document.getElementById("pausedValue");
+    const activeValue = document.getElementById("activeValue");
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function statusLabel(status) {
+      if (status === "done") return "Done";
+      if (status === "paused") return "Paused";
+      if (status === "active") return "Active";
+      return "All tasks";
+    }
+
+    function getVisibleTasks() {
+      if (activeFilter === "all") return TASKS;
+      return TASKS.filter(function(task) {
+        return task.status === activeFilter;
+      });
+    }
+
+    function toggleFilter(nextFilter) {
+      activeFilter = activeFilter === nextFilter ? "all" : nextFilter;
+      renderDashboard();
+    }
+
+    function updateStatusPills() {
+      const doneCount = TASKS.filter(function(task) { return task.status === "done"; }).length;
+      const pausedCount = TASKS.filter(function(task) { return task.status === "paused"; }).length;
+      const activeCount = TASKS.filter(function(task) { return task.status === "active"; }).length;
+
+      const total = TASKS.length || 1;
+      const donePct = Math.round((doneCount / total) * 100);
+      const pausedPct = Math.round((pausedCount / total) * 100);
+      const activePct = Math.round((activeCount / total) * 100);
+
+      doneValue.textContent = donePct + "% (" + doneCount + "/" + TASKS.length + ")";
+      pausedValue.textContent = pausedPct + "% (" + pausedCount + "/" + TASKS.length + ")";
+      activeValue.textContent = activePct + "% (" + activeCount + "/" + TASKS.length + ")";
+
+      donePill.classList.toggle("active", activeFilter === "done");
+      pausedPill.classList.toggle("active", activeFilter === "paused");
+      activePill.classList.toggle("active", activeFilter === "active");
+    }
+
+    function buildHoverText(task) {
+      let statusLine = "Active";
+      if (task.status === "done") {
+        statusLine = "Done";
+      } else if (task.status === "paused") {
+        statusLine = "Paused";
+      } else {
+        statusLine = "Active " + task.activeIndex + "/" + task.activeTotal;
+      }
+
+      return "<b>" + escapeHtml(task.name) + "</b><br>" +
+             "Owner: " + escapeHtml(task.owner) + "<br>" +
+             "Current Impact: " + task.currentImpact + "<br>" +
+             "Future Impact: " + task.futureImpact + "<br>" +
+             "Progress: " + task.progress + "%<br>" +
+             statusLine;
+    }
+
+    function renderImpactChart() {
+      const visibleTasks = getVisibleTasks();
+      const activeTasks = visibleTasks.filter(function(task) {
+        return task.status === "active";
+      });
+
+      const haloTrace = {
+        x: activeTasks.map(function(task) { return task.currentImpact; }),
+        y: activeTasks.map(function(task) { return task.futureImpact; }),
+        mode: "markers",
+        hoverinfo: "skip",
+        showlegend: false,
+        marker: {
+          size: activeTasks.map(function(task) { return task.bubbleSize + 8; }),
+          color: activeTasks.map(function(task) { return task.ownerColor; }),
+          opacity: 0.22,
+          line: {
+            width: 2,
+            color: activeTasks.map(function(task) { return task.ownerColor; }),
+          },
+        },
+      };
+
+      const pointTrace = {
+        x: visibleTasks.map(function(task) { return task.currentImpact; }),
+        y: visibleTasks.map(function(task) { return task.futureImpact; }),
+        mode: "markers",
+        text: visibleTasks.map(function(task) { return buildHoverText(task); }),
+        customdata: visibleTasks.map(function(task) { return task.status; }),
+        hovertemplate: "%{text}<extra></extra>",
+        showlegend: false,
+        marker: {
+          size: visibleTasks.map(function(task) { return task.bubbleSize; }),
+          color: visibleTasks.map(function(task) { return task.pointColor; }),
+          line: { width: 0 },
+        },
+      };
+
+      const layout = {
+        template: "plotly_dark",
+        paper_bgcolor: "__BG__",
+        plot_bgcolor: "__PANEL_2__",
+        font: { color: "__TEXT__" },
+        margin: { l: 60, r: 20, t: 10, b: 60 },
+        xaxis: {
+          title: "Impact on Current Offering (Sales Today)",
+          range: [0, 100],
+          gridcolor: "__BORDER__",
+          zeroline: false,
+        },
+        yaxis: {
+          title: "Impact on Future Offering (Next Packages & Growth)",
+          range: [0, 100],
+          gridcolor: "__BORDER__",
+          zeroline: false,
+        },
+        hoverlabel: {
+          bgcolor: "#111827",
+          font: { color: "#f8fafc" },
+        },
+      };
+
+      Plotly.react(impactEl, [haloTrace, pointTrace], layout, {
+        displayModeBar: false,
+        responsive: true,
+      });
+
+      if (impactEl.removeAllListeners) impactEl.removeAllListeners("plotly_click");
+      impactEl.on("plotly_click", function(event) {
+        const point = event.points && event.points[0];
+        if (!point || !point.customdata) return;
+        toggleFilter(point.customdata);
+      });
+    }
+
+    function renderPortfolioChart() {
+      const doneCount = TASKS.filter(function(task) { return task.status === "done"; }).length;
+      const pausedCount = TASKS.filter(function(task) { return task.status === "paused"; }).length;
+      const activeCount = TASKS.filter(function(task) { return task.status === "active"; }).length;
+
+      const total = TASKS.length || 1;
+      const donePct = Math.round((doneCount / total) * 100);
+      const pausedPct = Math.round((pausedCount / total) * 100);
+      const activePct = Math.max(0, 100 - donePct - pausedPct);
+
+      const doneTrace = {
+        x: [donePct],
+        y: [""],
+        type: "bar",
+        orientation: "h",
+        marker: {
+          color: "__DONE_GREEN__",
+          opacity: activeFilter !== "all" && activeFilter !== "done" ? 0.35 : 1,
+        },
+        customdata: ["done"],
+        hovertemplate: "Done: " + donePct + "% (" + doneCount + "/" + TASKS.length + ")<extra></extra>",
+        showlegend: false,
+      };
+
+      const pausedTrace = {
+        x: [pausedPct],
+        y: [""],
+        type: "bar",
+        orientation: "h",
+        marker: {
+          color: "__PAUSED_GRAY__",
+          opacity: activeFilter !== "all" && activeFilter !== "paused" ? 0.35 : 1,
+        },
+        customdata: ["paused"],
+        hovertemplate: "Paused: " + pausedPct + "% (" + pausedCount + "/" + TASKS.length + ")<extra></extra>",
+        showlegend: false,
+      };
+
+      const activeTrace = {
+        x: [activePct],
+        y: [""],
+        type: "bar",
+        orientation: "h",
+        marker: {
+          color: "__ACTIVE_BLUE__",
+          opacity: activeFilter !== "all" && activeFilter !== "active" ? 0.35 : 1,
+        },
+        customdata: ["active"],
+        hovertemplate: "Active: " + activePct + "% (" + activeCount + "/" + TASKS.length + ")<extra></extra>",
+        showlegend: false,
+      };
+
+      const layout = {
+        barmode: "stack",
+        template: "plotly_dark",
+        paper_bgcolor: "__BG__",
+        plot_bgcolor: "__PANEL_2__",
+        font: { color: "__TEXT__" },
+        margin: { l: 20, r: 20, t: 10, b: 20 },
+        xaxis: {
+          range: [0, 100],
+          visible: false,
+        },
+        yaxis: {
+          visible: false,
+        },
+      };
+
+      Plotly.react(portfolioEl, [doneTrace, pausedTrace, activeTrace], layout, {
+        displayModeBar: false,
+        responsive: true,
+      });
+
+      if (portfolioEl.removeAllListeners) portfolioEl.removeAllListeners("plotly_click");
+      portfolioEl.on("plotly_click", function(event) {
+        const point = event.points && event.points[0];
+        if (!point || !point.customdata) return;
+        toggleFilter(point.customdata);
+      });
+    }
+
+    function renderDashboard() {
+      activeFilterLabelEl.textContent = statusLabel(activeFilter);
+      updateStatusPills();
+      renderImpactChart();
+      renderPortfolioChart();
+    }
+
+    clearFilterBtn.addEventListener("click", function() {
+      activeFilter = "all";
+      renderDashboard();
+    });
+
+    donePill.addEventListener("click", function() {
+      toggleFilter("done");
+    });
+
+    pausedPill.addEventListener("click", function() {
+      toggleFilter("paused");
+    });
+
+    activePill.addEventListener("click", function() {
+      toggleFilter("active");
+    });
+
+    renderDashboard();
+  </script>
+</body>
+</html>

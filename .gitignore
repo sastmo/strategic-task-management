@@ -5,3 +5,4 @@ __pycache__/
 .streamlit/
 _uploaded_tasks.csv
 .DS_Store
+.env

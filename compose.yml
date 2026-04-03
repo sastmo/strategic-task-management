@@ -1,51 +1,57 @@
+x-db-env: &db-env
+  POSTGRES_DB: ${POSTGRES_DB:-strategic_tasks}
+  POSTGRES_USER: ${POSTGRES_USER:-stm_user}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stm_password}
+
+x-database-url: &database-url "postgresql://${POSTGRES_USER:-stm_user}:${POSTGRES_PASSWORD:-stm_password}@db:5432/${POSTGRES_DB:-strategic_tasks}"
+
 services:
   db:
     image: postgres:16
     container_name: strategic-task-management-db
-    environment:
-      POSTGRES_DB: strategic_tasks
-      POSTGRES_USER: stm_user
-      POSTGRES_PASSWORD: stm_password
+    environment: *db-env
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U stm_user -d strategic_tasks"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stm_user} -d ${POSTGRES_DB:-strategic_tasks}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   sync:
-    build: .
-    image: strategic-task-management:latest
+    build:
+      context: .
+      target: sync
+    image: strategic-task-management-sync:latest
     container_name: strategic-task-management-sync
-    entrypoint: ["python", "-u", "-m", "src.auto_sync"]
     volumes:
       - ./data:/app/data:ro
     environment:
-      DATABASE_URL: postgresql://stm_user:stm_password@db:5432/strategic_tasks
-      SYNC_SOURCE: /app/data
-      SYNC_POLL_SECONDS: 30
-      SYNC_REFRESH_SECONDS: 1800
-      SYNC_RETRY_SECONDS: 120
+      DATABASE_URL: *database-url
+      SYNC_SOURCE: ${SYNC_SOURCE:-/app/data}
+      SYNC_POLL_SECONDS: ${SYNC_POLL_SECONDS:-30}
+      SYNC_REFRESH_SECONDS: ${SYNC_REFRESH_SECONDS:-1800}
+      SYNC_RETRY_SECONDS: ${SYNC_RETRY_SECONDS:-120}
       PYTHONUNBUFFERED: "1"
     depends_on:
       db:
         condition: service_healthy
     restart: unless-stopped
-    healthcheck:
-      disable: true
-      
+
   app:
-    build: .
-    image: strategic-task-management:latest
+    build:
+      context: .
+      target: app
+    image: strategic-task-management-app:latest
     container_name: strategic-task-management
     ports:
       - "8501:8501"
     environment:
-      TASKS_SOURCE: postgresql://stm_user:stm_password@db:5432/strategic_tasks
+      TASKS_SOURCE: *database-url
+      APP_REFRESH_MS: ${APP_REFRESH_MS:-60000}
     depends_on:
       db:
         condition: service_healthy
