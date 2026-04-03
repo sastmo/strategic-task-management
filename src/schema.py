@@ -15,6 +15,12 @@ REQUIRED_COLUMNS: Final[list[str]] = [
     "done",
 ]
 
+SOURCE_METADATA_COLUMNS: Final[list[str]] = [
+    "_source_name",
+    "_source_kind",
+    "_source_sheet",
+]
+
 COLUMN_ALIASES: Final[dict[str, str]] = {
     "id": "id",
     "task id": "id",
@@ -101,6 +107,10 @@ def standardize_columns(df: pd.DataFrame) -> pd.DataFrame:
     rename_map: dict[str, str] = {}
 
     for col in df.columns:
+        if str(col).startswith("_source_"):
+            rename_map[col] = str(col)
+            continue
+
         clean = str(col).strip().replace("-", " ").replace("_", " ").lower()
         rename_map[col] = COLUMN_ALIASES.get(
             clean,
@@ -144,8 +154,28 @@ def deduplicate_ids(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def ensure_source_metadata(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+
+    if "_source_name" not in df.columns:
+        df["_source_name"] = "default"
+
+    if "_source_kind" not in df.columns:
+        df["_source_kind"] = "unknown"
+
+    if "_source_sheet" not in df.columns:
+        df["_source_sheet"] = ""
+
+    df["_source_name"] = df["_source_name"].astype(str).fillna("default")
+    df["_source_kind"] = df["_source_kind"].astype(str).fillna("unknown")
+    df["_source_sheet"] = df["_source_sheet"].astype(str).fillna("")
+
+    return df
+
+
 def validate_and_clean(df: pd.DataFrame) -> pd.DataFrame:
     df = standardize_columns(df).copy()
+    df = ensure_source_metadata(df)
 
     missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
     if missing:
@@ -204,7 +234,7 @@ def validate_and_clean(df: pd.DataFrame) -> pd.DataFrame:
     df = fill_blank_ids(df)
     df = deduplicate_ids(df)
 
-    return df[REQUIRED_COLUMNS + ["paused"]]
+    return df[REQUIRED_COLUMNS + ["paused"] + SOURCE_METADATA_COLUMNS]
 
 
 def is_done(task: Task) -> bool:
