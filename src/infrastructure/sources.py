@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import glob
+from io import BytesIO
 import json
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ import pandas as pd
 import requests
 
 from src.domain.tasks import normalize_union_mode
+from src.infrastructure.graph.client import GraphFileClient
 
 SourceSpec = str | dict[str, Any]
 SourceList = list[SourceSpec]
@@ -29,22 +31,41 @@ class ResolvedSourceSpec:
     source_name: str
     source_priority: int = 100
     source_order: int = 0
+    kind: str | None = None
     sheet_name: str | int | list[str | int] | None = None
     all_sheets: bool = False
+    site_url: str | None = None
+    drive_id: str | None = None
+    drive_name: str | None = None
+    file_path: str | None = None
+    item_id: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "source": self.source,
             "source_name": self.source_name,
             "source_priority": self.source_priority,
             "source_order": self.source_order,
+            "kind": self.kind,
             "sheet_name": self.sheet_name,
             "all_sheets": self.all_sheets,
         }
+        optional_values = {
+            "site_url": self.site_url,
+            "drive_id": self.drive_id,
+            "drive_name": self.drive_name,
+            "file_path": self.file_path,
+            "item_id": self.item_id,
+        }
+        payload.update({key: value for key, value in optional_values.items() if value})
+        return payload
 
 
 def detect_source_kind(source: str) -> str:
     source = str(source).strip()
+
+    if source.startswith("graph://"):
+        return "graph"
 
     if source.startswith(("postgresql://", "postgres://")):
         return "postgres"
@@ -82,6 +103,9 @@ def extract_json_records(payload: Any) -> list[dict[str, Any]]:
 def derive_source_name(source_value: str) -> str:
     source_value = str(source_value).strip()
 
+    if source_value.startswith("graph://"):
+        return Path(source_value.rsplit("::", 1)[-1]).stem or "graph_source"
+
     if source_value.startswith(("http://", "https://")):
         return source_value.rstrip("/").split("/")[-1] or "api_source"
 
@@ -89,9 +113,22 @@ def derive_source_name(source_value: str) -> str:
     return path.stem or path.name or "source"
 
 
+def is_graph_source_spec_dict(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+
+    kind = str(value.get("kind", value.get("source_kind", ""))).strip().lower()
+    return kind == "graph" or (
+        "site_url" in value and any(key in value for key in ("file_path", "item_id"))
+    )
+
+
 def is_source_spec_dict(value: object) -> bool:
-    return isinstance(value, dict) and any(
+    return isinstance(value, dict) and (
+        is_graph_source_spec_dict(value)
+        or any(
         key in value for key in ("source", "path", "url", "glob")
+        )
     )
 
 
@@ -162,11 +199,65 @@ def parse_source_config(source_input: Any) -> TaskSourceConfig:
     return TaskSourceConfig(sources=[raw_value])
 
 
+def build_graph_source_value(
+    *,
+    site_url: str,
+    file_path: str = "",
+    item_id: str = "",
+    drive_name: str = "",
+    drive_id: str = "",
+) -> str:
+    site_marker = site_url.replace("https://", "").replace("http://", "").rstrip("/")
+    drive_marker = drive_name or drive_id or "default-drive"
+    item_marker = (file_path or item_id or "graph-item").lstrip("/")
+    return f"graph://{site_marker}::{drive_marker}::{item_marker}"
+
+
 def normalize_source_spec(
     source: SourceSpec,
     *,
     source_order: int | None = None,
 ) -> ResolvedSourceSpec:
+    if is_graph_source_spec_dict(source):
+        assert isinstance(source, dict)
+
+        site_url = str(source.get("site_url", "")).strip()
+        drive_id = str(source.get("drive_id", "")).strip()
+        drive_name = str(source.get("drive_name", "")).strip()
+        file_path = str(source.get("file_path", "")).strip()
+        item_id = str(source.get("item_id", "")).strip()
+
+        if not site_url:
+            raise ValueError("Graph source specs must include a 'site_url'.")
+        if not file_path and not item_id:
+            raise ValueError("Graph source specs must include 'file_path' or 'item_id'.")
+
+        synthetic_source = build_graph_source_value(
+            site_url=site_url,
+            file_path=file_path,
+            item_id=item_id,
+            drive_name=drive_name,
+            drive_id=drive_id,
+        )
+        source_name = str(source.get("source_name", "")).strip() or derive_source_name(
+            file_path or item_id or synthetic_source
+        )
+
+        return ResolvedSourceSpec(
+            source=synthetic_source,
+            source_name=source_name,
+            source_priority=int(source.get("source_priority", 100)),
+            source_order=int(source_order if source_order is not None else source.get("source_order", 0)),
+            kind="graph",
+            sheet_name=source.get("sheet_name"),
+            all_sheets=bool(source.get("all_sheets", False)),
+            site_url=site_url,
+            drive_id=drive_id or None,
+            drive_name=drive_name or None,
+            file_path=file_path or None,
+            item_id=item_id or None,
+        )
+
     if isinstance(source, str):
         spec = {
             "source": source,
@@ -193,6 +284,7 @@ def normalize_source_spec(
         source_name=str(spec["source_name"]).strip() or derive_source_name(str(spec["source"])),
         source_priority=int(spec.get("source_priority", 100)),
         source_order=int(source_order if source_order is not None else spec.get("source_order", 0)),
+        kind=str(spec.get("kind", spec.get("source_kind", ""))).strip().lower() or None,
         sheet_name=spec.get("sheet_name"),
         all_sheets=bool(spec.get("all_sheets", False)),
     )
@@ -258,12 +350,13 @@ def add_source_metadata(
     source_spec: ResolvedSourceSpec,
     source_kind: str,
     source_sheet: str | None = None,
+    source_path: str | None = None,
 ) -> pd.DataFrame:
     df = df.copy()
     df["source_name"] = source_spec.source_name
     df["source_kind"] = source_kind
     df["source_sheet"] = source_sheet or ""
-    df["source_path"] = source_spec.source
+    df["source_path"] = source_path or source_spec.source
     df["source_priority"] = int(source_spec.source_priority)
     df["source_order"] = int(source_spec.source_order)
     df["source_row_number"] = range(1, len(df) + 1)
@@ -327,6 +420,120 @@ def read_excel_source(source_spec: ResolvedSourceSpec) -> list[pd.DataFrame]:
     return frames
 
 
+def infer_content_kind(name: str) -> str:
+    suffix = Path(str(name)).suffix.lower()
+    if suffix == ".csv":
+        return "csv"
+    if suffix in {".xlsx", ".xls"}:
+        return "excel"
+    if suffix == ".json":
+        return "json"
+    raise ValueError(f"Unsupported Graph file type: {name}")
+
+
+def read_csv_bytes_source(content: bytes) -> pd.DataFrame:
+    return pd.read_csv(BytesIO(content), dtype=object)
+
+
+def read_json_bytes_source(content: bytes) -> pd.DataFrame:
+    payload = json.loads(content.decode("utf-8"))
+    return pd.DataFrame(extract_json_records(payload))
+
+
+def read_excel_bytes_source(
+    source_spec: ResolvedSourceSpec,
+    content: bytes,
+    *,
+    source_kind: str,
+    source_path: str,
+) -> list[pd.DataFrame]:
+    frames: list[pd.DataFrame] = []
+
+    if source_spec.all_sheets:
+        workbook = pd.read_excel(BytesIO(content), sheet_name=None, dtype=object)
+        for sheet, df in workbook.items():
+            frames.append(
+                add_source_metadata(
+                    df,
+                    source_spec=source_spec,
+                    source_kind=source_kind,
+                    source_sheet=str(sheet),
+                    source_path=source_path,
+                )
+            )
+        return frames
+
+    if isinstance(source_spec.sheet_name, list):
+        for sheet in source_spec.sheet_name:
+            df = pd.read_excel(BytesIO(content), sheet_name=sheet, dtype=object)
+            frames.append(
+                add_source_metadata(
+                    df,
+                    source_spec=source_spec,
+                    source_kind=source_kind,
+                    source_sheet=str(sheet),
+                    source_path=source_path,
+                )
+            )
+        return frames
+
+    selected_sheet = source_spec.sheet_name if source_spec.sheet_name is not None else 0
+    df = pd.read_excel(BytesIO(content), sheet_name=selected_sheet, dtype=object)
+    frames.append(
+        add_source_metadata(
+            df,
+            source_spec=source_spec,
+            source_kind=source_kind,
+            source_sheet=str(selected_sheet),
+            source_path=source_path,
+        )
+    )
+    return frames
+
+
+def read_graph_source(source_spec: ResolvedSourceSpec) -> list[pd.DataFrame]:
+    client = GraphFileClient.from_env()
+    download = client.download_file(
+        site_url=source_spec.site_url or "",
+        drive_id=source_spec.drive_id or "",
+        drive_name=source_spec.drive_name or "",
+        file_path=source_spec.file_path or "",
+        item_id=source_spec.item_id or "",
+    )
+    content_kind = infer_content_kind(download.name)
+    source_path = download.web_url or source_spec.source
+
+    if content_kind == "csv":
+        return [
+            add_source_metadata(
+                read_csv_bytes_source(download.content),
+                source_spec=source_spec,
+                source_kind="graph_csv",
+                source_path=source_path,
+            )
+        ]
+
+    if content_kind == "json":
+        return [
+            add_source_metadata(
+                read_json_bytes_source(download.content),
+                source_spec=source_spec,
+                source_kind="graph_json",
+                source_path=source_path,
+            )
+        ]
+
+    if content_kind == "excel":
+        return read_excel_bytes_source(
+            source_spec,
+            download.content,
+            source_kind="graph_excel",
+            source_path=source_path,
+        )
+
+    raise ValueError(f"Unsupported Graph file kind: {content_kind}")
+
+
 def coerce_source_spec(source: ResolvedSourceSpec | SourceSpec) -> ResolvedSourceSpec:
     if isinstance(source, ResolvedSourceSpec):
         return source
@@ -335,7 +542,7 @@ def coerce_source_spec(source: ResolvedSourceSpec | SourceSpec) -> ResolvedSourc
 
 def read_source_spec_to_frames(source: ResolvedSourceSpec | SourceSpec) -> list[pd.DataFrame]:
     source_spec = coerce_source_spec(source)
-    kind = detect_source_kind(source_spec.source)
+    kind = source_spec.kind or detect_source_kind(source_spec.source)
 
     if kind == "postgres":
         raise ValueError(
@@ -371,5 +578,8 @@ def read_source_spec_to_frames(source: ResolvedSourceSpec | SourceSpec) -> list[
 
     if kind == "excel":
         return read_excel_source(source_spec)
+
+    if kind == "graph":
+        return read_graph_source(source_spec)
 
     raise ValueError(f"Unsupported source kind: {kind}")

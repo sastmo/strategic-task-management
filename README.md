@@ -1,9 +1,65 @@
-cat > README.md <<'EOF'
 # Strategic Task Management
 
-## Run on Mac/Linux
-./run.sh
+## Run locally
 
-## Run on Windows
+### Mac/Linux
+```bash
+./run.sh
+```
+
+### Windows
+```bat
 run.bat
-EOF
+```
+
+## Default local stack
+
+```bash
+docker compose up --build
+```
+
+## Source config examples
+
+### Local files
+```json
+{
+  "sources": [
+    "/app/data/tasks.csv",
+    {
+      "source": "/app/data/planning.xlsx",
+      "source_name": "planning_book",
+      "all_sheets": true
+    }
+  ],
+  "union_mode": "union"
+}
+```
+
+### Microsoft Graph / SharePoint
+```json
+{
+  "sources": [
+    {
+      "kind": "graph",
+      "site_url": "https://contoso.sharepoint.com/sites/Strategy",
+      "drive_name": "Shared Documents",
+      "file_path": "/Plans/master.xlsx",
+      "source_name": "sharepoint_master",
+      "all_sheets": true
+    }
+  ],
+  "union_mode": "union"
+}
+```
+
+Set that config in `SYNC_SOURCE_CONFIG` or `TASKS_SOURCE`.
+`site_url` should be the SharePoint site itself, and `file_path` should be relative to the selected document library root.
+
+## Graph auth env vars
+
+- `GRAPH_AUTH_MODE=client_secret`
+- `GRAPH_TENANT_ID=...`
+- `GRAPH_CLIENT_ID=...`
+- `GRAPH_CLIENT_SECRET=...`
+
+For Azure-managed identity later, switch `GRAPH_AUTH_MODE` to `managed_identity` or `default_azure_credential`.

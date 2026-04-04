@@ -6,6 +6,9 @@ from typing import TYPE_CHECKING, Any
 __all__ = [
     "COLUMN_ALIASES",
     "CURRENT_COLUMNS",
+    "GraphAuthSettings",
+    "GraphDownloadedFile",
+    "GraphFileClient",
     "REQUIRED_COLUMNS",
     "ResolvedSourceSpec",
     "SOURCE_METADATA_COLUMNS",
@@ -27,8 +30,10 @@ __all__ = [
     "has_azure_identity_support",
     "is_database_url",
     "load_tasks_from_database",
+    "load_graph_auth_settings",
     "open_user_access_repository",
     "normalize_task_frame",
+    "parse_site_url",
     "parse_source_config",
     "parse_app_service_user",
     "read_source_spec_to_frames",
@@ -71,6 +76,13 @@ if TYPE_CHECKING:
         get_default_azure_credential,
         has_azure_identity_support,
     )
+    from src.infrastructure.graph.client import (
+        GraphAuthSettings,
+        GraphDownloadedFile,
+        GraphFileClient,
+        load_graph_auth_settings,
+        parse_site_url,
+    )
     from src.infrastructure.user_repository import (
         UserAccessRepository,
         open_user_access_repository,
@@ -104,6 +116,11 @@ def __getattr__(name: str) -> Any:
         "parse_app_service_user": ("src.infrastructure.auth.app_service", "parse_app_service_user"),
         "get_default_azure_credential": ("src.infrastructure.azure.credentials", "get_default_azure_credential"),
         "has_azure_identity_support": ("src.infrastructure.azure.credentials", "has_azure_identity_support"),
+        "GraphAuthSettings": ("src.infrastructure.graph.client", "GraphAuthSettings"),
+        "GraphDownloadedFile": ("src.infrastructure.graph.client", "GraphDownloadedFile"),
+        "GraphFileClient": ("src.infrastructure.graph.client", "GraphFileClient"),
+        "load_graph_auth_settings": ("src.infrastructure.graph.client", "load_graph_auth_settings"),
+        "parse_site_url": ("src.infrastructure.graph.client", "parse_site_url"),
         "UserAccessRepository": ("src.infrastructure.user_repository", "UserAccessRepository"),
         "open_user_access_repository": ("src.infrastructure.user_repository", "open_user_access_repository"),
         "TaskWarehouseStore": ("src.infrastructure.task_store", "TaskWarehouseStore"),
