@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+"""Compatibility exports for the loader/workflow API.
+
+The main implementation now lives under src.application and src.infrastructure.
+"""
+
 from src.application.task_workflow import (
     LoadedTaskBatch,
     load_task_batch,

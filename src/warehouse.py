@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Compatibility layer for warehouse storage helpers."""
+
 from typing import Any
 
 import pandas as pd

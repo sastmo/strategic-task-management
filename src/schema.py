@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+"""Compatibility exports for task normalization and schema helpers.
+
+The canonical frame logic now lives in src.domain and src.infrastructure.task_frames.
+"""
+
 from src.domain.tasks import (
     SUPPORTED_UNION_MODES,
     Task,

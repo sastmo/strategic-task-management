@@ -247,6 +247,12 @@ def load_dashboard_template() -> str:
     return template_path.read_text(encoding="utf-8")
 
 
+@lru_cache(maxsize=None)
+def load_dashboard_asset(name: str) -> str:
+    asset_path = Path(__file__).resolve().parent / "assets" / name
+    return asset_path.read_text(encoding="utf-8")
+
+
 def render_dashboard_template(replacements: dict[str, str]) -> str:
     html = load_dashboard_template()
     for key, value in replacements.items():
@@ -269,6 +275,8 @@ def build_dashboard_html(tasks: list[Task]) -> str:
             "__TASKS_JSON__": tasks_json,
             "__OWNERS_HTML__": owners_html,
             "__ROLE_LEGEND__": role_legend,
+            "__DASHBOARD_CSS__": load_dashboard_asset("dashboard.css"),
+            "__DASHBOARD_JS__": load_dashboard_asset("dashboard.js"),
             "__BG__": BG,
             "__PANEL__": PANEL,
             "__PANEL_2__": PANEL_2,

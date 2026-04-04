@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Compatibility entrypoint for the auto-sync loop."""
+
 from src.application.auto_sync import (
     AutoSyncMonitor,
     SourceSnapshot,

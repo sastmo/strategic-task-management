@@ -18,6 +18,39 @@ run.bat
 docker compose up --build
 ```
 
+## CI
+
+GitHub Actions now runs these checks on pushes, pull requests, and manual runs:
+
+```bash
+python -m compileall src app.py
+python -m unittest discover -s tests -v
+docker compose config
+```
+
+## Architecture at a glance
+
+- `app.py`: Streamlit entrypoint
+- `src/domain/`: business rules and core models
+- `src/application/`: orchestration for auth, sync, settings, and workflows
+- `src/infrastructure/`: files, Graph, database, Azure, and external system integrations
+- `src/presentation/`: dashboard rendering and auth-facing UI pieces
+- `sql/`: warehouse, marts, and operational analytics SQL assets
+- `tests/`: unit and behavior tests
+
+## Compatibility modules
+
+These root modules still exist to avoid breaking older imports:
+
+- `src/loader.py`
+- `src/schema.py`
+- `src/sync_to_db.py`
+- `src/warehouse.py`
+- `src/auto_sync.py`
+- `src/dashboard.py`
+
+The main implementation now lives in the layered packages under `src/`.
+
 ## Source config examples
 
 ### Local files

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Compatibility entrypoint for the task sync workflow."""
+
 from pathlib import Path
 from typing import Any
 
