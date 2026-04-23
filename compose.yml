@@ -1,18 +1,88 @@
+x-db-env: &db-env
+  POSTGRES_DB: ${POSTGRES_DB:-strategic_tasks}
+  POSTGRES_USER: ${POSTGRES_USER:-stm_user}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stm_password}
+
+x-database-url: &database-url "postgresql://${POSTGRES_USER:-stm_user}:${POSTGRES_PASSWORD:-stm_password}@db:5432/${POSTGRES_DB:-strategic_tasks}"
+
 services:
-  app:
-    build: .
-    image: strategic-task-management:latest
-    container_name: strategic-task-management
+  db:
+    image: postgres:16
+    container_name: strategic-task-management-db
+    environment: *db-env
     ports:
-      - "8501:8501"
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stm_user} -d ${POSTGRES_DB:-strategic_tasks}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  sync:
+    build:
+      context: .
+      target: sync
+    image: strategic-task-management-sync:latest
+    container_name: strategic-task-management-sync
     volumes:
       - ./data:/app/data:ro
     environment:
-      TASKS_SOURCE: /app/data/tasks.csv
+      DATABASE_URL: *database-url
+      GRAPH_AUTH_MODE: ${GRAPH_AUTH_MODE:-client_secret}
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      GRAPH_BASE_URL: ${GRAPH_BASE_URL:-https://graph.microsoft.com/v1.0}
+      GRAPH_TIMEOUT_SECONDS: ${GRAPH_TIMEOUT_SECONDS:-30}
+      SYNC_SOURCE: ${SYNC_SOURCE:-/app/data}
+      SYNC_POLL_SECONDS: ${SYNC_POLL_SECONDS:-30}
+      SYNC_REFRESH_SECONDS: ${SYNC_REFRESH_SECONDS:-1800}
+      SYNC_RETRY_SECONDS: ${SYNC_RETRY_SECONDS:-120}
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
+
+  app:
+    build:
+      context: .
+      target: app
+    image: strategic-task-management-app:latest
+    container_name: strategic-task-management
+    ports:
+      - "8501:8501"
+    environment:
+      TASKS_SOURCE: *database-url
+      APP_REFRESH_MS: ${APP_REFRESH_MS:-60000}
+      DATABASE_URL: *database-url
+      GRAPH_AUTH_MODE: ${GRAPH_AUTH_MODE:-client_secret}
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      GRAPH_BASE_URL: ${GRAPH_BASE_URL:-https://graph.microsoft.com/v1.0}
+      GRAPH_TIMEOUT_SECONDS: ${GRAPH_TIMEOUT_SECONDS:-30}
+      AUTH_MODE: ${AUTH_MODE:-local}
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
+      AUTH_REQUIRE_EXPLICIT_ACCESS: ${AUTH_REQUIRE_EXPLICIT_ACCESS:-false}
+      AUTH_DEFAULT_ROLE: ${AUTH_DEFAULT_ROLE:-viewer}
+      AUTH_USE_DATABASE_ROLES: ${AUTH_USE_DATABASE_ROLES:-true}
+      AUTH_AUDIT_TO_DATABASE: ${AUTH_AUDIT_TO_DATABASE:-true}
+      AUTH_LOCAL_USER_EMAIL: ${AUTH_LOCAL_USER_EMAIL:-local.admin@example.com}
+      AUTH_LOCAL_USER_NAME: ${AUTH_LOCAL_USER_NAME:-Local Admin}
+      AUTH_LOCAL_USER_ROLES: ${AUTH_LOCAL_USER_ROLES:-admin}
+      AUTH_ALLOWED_TENANT_IDS: ${AUTH_ALLOWED_TENANT_IDS:-}
+      AUTH_VIEWER_GROUP_IDS: ${AUTH_VIEWER_GROUP_IDS:-}
+      AUTH_EDITOR_GROUP_IDS: ${AUTH_EDITOR_GROUP_IDS:-}
+      AUTH_ADMIN_GROUP_IDS: ${AUTH_ADMIN_GROUP_IDS:-}
+      APP_AUTH_SHOW_STATUS: ${APP_AUTH_SHOW_STATUS:-true}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

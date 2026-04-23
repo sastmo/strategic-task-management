@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Strategic Task Management</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+__DASHBOARD_CSS__
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel legend-panel">
+      <div class="panel-title">Current vs Future Impact Map</div>
+      <p class="panel-subtitle">X-axis: Current Offering. Y-axis: Future Offering.</p>
+      <div class="role-legend">
+        __ROLE_LEGEND__
+      </div>
+    </div>
+
+    <div class="dashboard-grid">
+      <div class="panel">
+        <div class="chart-toolbar">
+          <div class="filter-pill">Filter: <strong id="activeFilterLabel">All tasks</strong></div>
+          <button id="clearFilterBtn" class="clear-btn" type="button">Clear filter</button>
+        </div>
+        <div class="panel-title">Strategic Positioning</div>
+        <div id="impactChart"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Completion Distribution</div>
+        <div id="portfolioChart"></div>
+        <div class="status-row">
+          <button id="donePill" class="status-pill" type="button">
+            <div class="status-label"><span class="status-dot" style="background:__DONE_GREEN__"></span>Done</div>
+            <div id="doneValue" class="status-value">-</div>
+          </button>
+          <button id="pausedPill" class="status-pill" type="button">
+            <div class="status-label"><span class="status-dot" style="background:__PAUSED_GRAY__"></span>Paused</div>
+            <div id="pausedValue" class="status-value">-</div>
+          </button>
+          <button id="activePill" class="status-pill" type="button">
+            <div class="status-label"><span class="status-dot" style="background:__ACTIVE_BLUE__"></span>Active</div>
+            <div id="activeValue" class="status-value">-</div>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Owner Views</div>
+    <div class="owners-grid">
+      __OWNERS_HTML__
+    </div>
+  </div>
+
+  <script>
+    const TASKS = __TASKS_JSON__;
+__DASHBOARD_JS__
+  </script>
+</body>
+</html>
