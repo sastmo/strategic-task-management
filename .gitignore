@@ -1,8 +1,28 @@
+# Virtual environments
 stm_env/
 .venv/
+
+# Python cache
 __pycache__/
 *.pyc
+*.pyo
+
+# Streamlit
 .streamlit/
-_uploaded_tasks.csv
-.DS_Store
+
+# Environment variables
 .env
+
+# Generated at runtime by Streamlit file-upload
+_uploaded_tasks.csv
+
+# Test and type-checker caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+
+# macOS
+.DS_Store

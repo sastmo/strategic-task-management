@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import os
+import time
 from typing import Any
 from urllib.parse import quote, urlparse
 
 import requests
 
 from src.domain.tasks import text_or_blank
+
+_logger = logging.getLogger(__name__)
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 1.0
 
 GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 SUPPORTED_GRAPH_AUTH_MODES = {
@@ -92,6 +98,13 @@ def normalize_item_path(file_path: str) -> str:
     return "/" + path.lstrip("/")
 
 
+def _retry_delay(response: requests.Response, attempt: int) -> float:
+    try:
+        return float(response.headers.get("Retry-After", ""))
+    except (ValueError, TypeError):
+        return _RETRY_BACKOFF_BASE * (2 ** attempt)
+
+
 def graph_error_message(response: requests.Response) -> str:
     try:
         payload = response.json()
@@ -155,29 +168,51 @@ class GraphFileClient:
         return headers
 
     def request_json(self, path: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        response = self.session.get(
-            f"{self.settings.base_url}/{path.lstrip('/')}",
-            headers=self.auth_headers(),
-            params=params,
-            timeout=self.settings.timeout_seconds,
-        )
-        if not response.ok:
-            raise RuntimeError(graph_error_message(response))
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise RuntimeError(f"Unexpected Graph payload for {path}: {payload!r}")
-        return payload
+        url = f"{self.settings.base_url}/{path.lstrip('/')}"
+        for attempt in range(_MAX_RETRIES + 1):
+            response = self.session.get(
+                url,
+                headers=self.auth_headers(),
+                params=params,
+                timeout=self.settings.timeout_seconds,
+            )
+            if response.status_code == 429 and attempt < _MAX_RETRIES:
+                delay = _retry_delay(response, attempt)
+                _logger.warning(
+                    "Graph API rate-limited (429); retrying in %.1fs (attempt %d/%d)",
+                    delay, attempt + 1, _MAX_RETRIES,
+                )
+                time.sleep(delay)
+                continue
+            if not response.ok:
+                raise RuntimeError(graph_error_message(response))
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise RuntimeError(f"Unexpected Graph payload for {path}: {payload!r}")
+            return payload
+        raise RuntimeError(f"Graph API rate limit exceeded after {_MAX_RETRIES} retries for {path}")
 
     def request_bytes(self, path: str) -> bytes:
-        response = self.session.get(
-            f"{self.settings.base_url}/{path.lstrip('/')}",
-            headers=self.auth_headers(accept="*/*"),
-            timeout=self.settings.timeout_seconds,
-            allow_redirects=True,
-        )
-        if not response.ok:
-            raise RuntimeError(graph_error_message(response))
-        return response.content
+        url = f"{self.settings.base_url}/{path.lstrip('/')}"
+        for attempt in range(_MAX_RETRIES + 1):
+            response = self.session.get(
+                url,
+                headers=self.auth_headers(accept="*/*"),
+                timeout=self.settings.timeout_seconds,
+                allow_redirects=True,
+            )
+            if response.status_code == 429 and attempt < _MAX_RETRIES:
+                delay = _retry_delay(response, attempt)
+                _logger.warning(
+                    "Graph API rate-limited (429); retrying in %.1fs (attempt %d/%d)",
+                    delay, attempt + 1, _MAX_RETRIES,
+                )
+                time.sleep(delay)
+                continue
+            if not response.ok:
+                raise RuntimeError(graph_error_message(response))
+            return response.content
+        raise RuntimeError(f"Graph API rate limit exceeded after {_MAX_RETRIES} retries for {path}")
 
     def resolve_site_id(self, site_url: str) -> str:
         site = parse_site_url(site_url)

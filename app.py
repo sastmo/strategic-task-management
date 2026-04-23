@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+import logging
 from pathlib import Path
 from uuid import uuid4
 
@@ -22,6 +23,8 @@ from src.presentation import (
     render_authorization_gate,
     render_user_status,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def session_id() -> str:
@@ -125,7 +128,7 @@ def main() -> None:
                 )
                 st.session_state["dashboard_view_recorded"] = True
         except Exception:
-            pass
+            _logger.exception("Failed to record dashboard view for session %s", session_id())
 
     components.html(
         build_dashboard_html(tasks),

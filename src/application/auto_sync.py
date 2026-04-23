@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
 import time
-import traceback
 from typing import Any, Callable
 
 from src.application.settings import AutoSyncSettings, load_auto_sync_settings
 from src.infrastructure.sources import detect_source_kind, expand_source_specs, parse_source_config
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +58,7 @@ class AutoSyncMonitor:
                 snapshot = build_source_snapshot(self.settings.source_input)
             except Exception as exc:
                 self.printer(f"Auto sync source scan failed: {exc}")
-                traceback.print_exc()
+                _logger.exception("Auto sync source scan failed")
                 self.sleep(self.settings.retry_seconds)
                 continue
 
@@ -96,7 +98,7 @@ class AutoSyncMonitor:
             except Exception as exc:
                 self.last_attempt_failed = True
                 self.printer(f"Auto sync failed: {exc}")
-                traceback.print_exc()
+                _logger.exception("Auto sync failed")
                 self.sleep(self.settings.retry_seconds)
                 continue
 

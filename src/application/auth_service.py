@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Any, Mapping, Protocol
 
 from src.application.settings import AuthSettings
@@ -18,6 +19,8 @@ from src.infrastructure.auth.app_service import (
     build_app_service_logout_url,
     parse_app_service_user,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 class UserAccessRepositoryLike(Protocol):
@@ -113,6 +116,12 @@ def resolve_request_authorization(
         try:
             user = parse_app_service_user(headers)
         except Exception as exc:
+            _logger.warning(
+                "Azure identity header parsing failed (%s): %s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
             return AuthorizationContext(
                 state="access_denied",
                 user=None,

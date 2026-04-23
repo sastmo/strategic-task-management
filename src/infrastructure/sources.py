@@ -5,7 +5,7 @@ import glob
 from io import BytesIO
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 import requests
@@ -378,46 +378,62 @@ def read_api_source(source: str) -> pd.DataFrame:
     return pd.DataFrame(extract_json_records(response.json()))
 
 
-def read_excel_source(source_spec: ResolvedSourceSpec) -> list[pd.DataFrame]:
+def _read_excel_frames(
+    load_sheet: Callable,
+    load_all_sheets: Callable,
+    source_spec: ResolvedSourceSpec,
+    *,
+    source_kind: str,
+    source_path: str | None = None,
+) -> list[pd.DataFrame]:
     frames: list[pd.DataFrame] = []
 
     if source_spec.all_sheets:
-        workbook = pd.read_excel(source_spec.source, sheet_name=None, dtype=object)
-        for sheet, df in workbook.items():
+        for sheet, df in load_all_sheets().items():
             frames.append(
                 add_source_metadata(
                     df,
                     source_spec=source_spec,
-                    source_kind="excel",
+                    source_kind=source_kind,
                     source_sheet=str(sheet),
+                    source_path=source_path,
                 )
             )
         return frames
 
     if isinstance(source_spec.sheet_name, list):
         for sheet in source_spec.sheet_name:
-            df = pd.read_excel(source_spec.source, sheet_name=sheet, dtype=object)
             frames.append(
                 add_source_metadata(
-                    df,
+                    load_sheet(sheet),
                     source_spec=source_spec,
-                    source_kind="excel",
+                    source_kind=source_kind,
                     source_sheet=str(sheet),
+                    source_path=source_path,
                 )
             )
         return frames
 
     selected_sheet = source_spec.sheet_name if source_spec.sheet_name is not None else 0
-    df = pd.read_excel(source_spec.source, sheet_name=selected_sheet, dtype=object)
     frames.append(
         add_source_metadata(
-            df,
+            load_sheet(selected_sheet),
             source_spec=source_spec,
-            source_kind="excel",
+            source_kind=source_kind,
             source_sheet=str(selected_sheet),
+            source_path=source_path,
         )
     )
     return frames
+
+
+def read_excel_source(source_spec: ResolvedSourceSpec) -> list[pd.DataFrame]:
+    return _read_excel_frames(
+        load_sheet=lambda sheet: pd.read_excel(source_spec.source, sheet_name=sheet, dtype=object),
+        load_all_sheets=lambda: pd.read_excel(source_spec.source, sheet_name=None, dtype=object),
+        source_spec=source_spec,
+        source_kind="excel",
+    )
 
 
 def infer_content_kind(name: str) -> str:
@@ -447,48 +463,13 @@ def read_excel_bytes_source(
     source_kind: str,
     source_path: str,
 ) -> list[pd.DataFrame]:
-    frames: list[pd.DataFrame] = []
-
-    if source_spec.all_sheets:
-        workbook = pd.read_excel(BytesIO(content), sheet_name=None, dtype=object)
-        for sheet, df in workbook.items():
-            frames.append(
-                add_source_metadata(
-                    df,
-                    source_spec=source_spec,
-                    source_kind=source_kind,
-                    source_sheet=str(sheet),
-                    source_path=source_path,
-                )
-            )
-        return frames
-
-    if isinstance(source_spec.sheet_name, list):
-        for sheet in source_spec.sheet_name:
-            df = pd.read_excel(BytesIO(content), sheet_name=sheet, dtype=object)
-            frames.append(
-                add_source_metadata(
-                    df,
-                    source_spec=source_spec,
-                    source_kind=source_kind,
-                    source_sheet=str(sheet),
-                    source_path=source_path,
-                )
-            )
-        return frames
-
-    selected_sheet = source_spec.sheet_name if source_spec.sheet_name is not None else 0
-    df = pd.read_excel(BytesIO(content), sheet_name=selected_sheet, dtype=object)
-    frames.append(
-        add_source_metadata(
-            df,
-            source_spec=source_spec,
-            source_kind=source_kind,
-            source_sheet=str(selected_sheet),
-            source_path=source_path,
-        )
+    return _read_excel_frames(
+        load_sheet=lambda sheet: pd.read_excel(BytesIO(content), sheet_name=sheet, dtype=object),
+        load_all_sheets=lambda: pd.read_excel(BytesIO(content), sheet_name=None, dtype=object),
+        source_spec=source_spec,
+        source_kind=source_kind,
+        source_path=source_path,
     )
-    return frames
 
 
 def read_graph_source(source_spec: ResolvedSourceSpec) -> list[pd.DataFrame]:

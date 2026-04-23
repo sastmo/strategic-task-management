@@ -21,6 +21,9 @@ class Task:
     done: bool = False
     paused: bool = False
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "progress", max(0, min(100, self.progress)))
+
     @property
     def currentImpact(self) -> int:
         return self.current_impact

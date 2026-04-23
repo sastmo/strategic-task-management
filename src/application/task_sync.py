@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import logging
 from typing import Any
 
 from src.application.task_workflow import load_task_batch
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,5 +129,5 @@ def sync_to_database(source_input: Any, database_url: str) -> SyncSummary:
         deleted_count=merge_stats["deleted_count"],
         unchanged_count=merge_stats["unchanged_count"],
     )
-    print(summary.describe())
+    _logger.info(summary.describe())
     return summary
