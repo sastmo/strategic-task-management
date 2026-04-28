@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import re
 from typing import Final, Literal
 
@@ -20,6 +21,7 @@ class Task:
     progress: int
     done: bool = False
     paused: bool = False
+    completed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "progress", max(0, min(100, self.progress)))
@@ -129,3 +131,24 @@ def task_status(task: Task) -> TaskStatus:
     if is_paused(task):
         return "paused"
     return "active"
+
+
+def owner_view_visible(
+    task: Task,
+    *,
+    now: datetime | None = None,
+    done_retention_days: int = 14,
+) -> bool:
+    if not is_done(task):
+        return True
+
+    if task.completed_at is None:
+        return True
+
+    reference = now or datetime.now(timezone.utc)
+    completed_at = (
+        task.completed_at
+        if task.completed_at.tzinfo is not None
+        else task.completed_at.replace(tzinfo=timezone.utc)
+    )
+    return completed_at >= reference - timedelta(days=done_retention_days)
