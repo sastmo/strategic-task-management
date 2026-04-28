@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 from typing import Any
 
@@ -109,6 +110,7 @@ class TaskWarehouseStore:
                 source_order INTEGER NOT NULL DEFAULT 0,
                 source_row_number INTEGER NOT NULL DEFAULT 0,
                 is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                completed_at TIMESTAMPTZ,
                 first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 created_run_id BIGINT REFERENCES ops.ingestion_runs(run_id),
@@ -136,8 +138,17 @@ class TaskWarehouseStore:
                 source_kind TEXT NOT NULL,
                 source_sheet TEXT NOT NULL DEFAULT '',
                 source_path TEXT NOT NULL DEFAULT '',
+                completed_at TIMESTAMPTZ,
                 changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
+            """,
+            """
+            ALTER TABLE warehouse.tasks_current
+            ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ
+            """,
+            """
+            ALTER TABLE warehouse.task_history
+            ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ
             """,
             """
             CREATE INDEX IF NOT EXISTS idx_ingestion_runs_status
@@ -455,7 +466,8 @@ class TaskWarehouseStore:
                 future_impact,
                 progress,
                 done,
-                paused
+                paused,
+                completed_at
             FROM warehouse.tasks_current
             WHERE is_deleted = FALSE
             ORDER BY owner, name
@@ -470,7 +482,8 @@ class TaskWarehouseStore:
                 future_impact,
                 progress,
                 done,
-                paused
+                paused,
+                NULL::timestamptz AS completed_at
             FROM public.tasks
             ORDER BY owner, name
             """
@@ -490,6 +503,7 @@ class TaskWarehouseStore:
                 progress=int(row["progress"]),
                 done=bool(row["done"]),
                 paused=bool(row["paused"]),
+                completed_at=_to_optional_datetime(row["completed_at"]),
             )
             for row in rows
         ]
@@ -596,7 +610,8 @@ class TaskWarehouseStore:
                     source_name,
                     source_kind,
                     source_sheet,
-                    source_path
+                    source_path,
+                    completed_at
                 )
                 SELECT
                     src.run_id,
@@ -619,7 +634,12 @@ class TaskWarehouseStore:
                     src.source_name,
                     src.source_kind,
                     src.source_sheet,
-                    src.source_path
+                    src.source_path,
+                    CASE
+                        WHEN src.done AND COALESCE(target.done, FALSE) = FALSE THEN NOW()
+                        WHEN src.done THEN target.completed_at
+                        ELSE NULL
+                    END AS completed_at
                 FROM staging.task_snapshots src
                 LEFT JOIN warehouse.tasks_current target
                     ON target.record_id = src.record_id
@@ -657,6 +677,7 @@ class TaskWarehouseStore:
                     source_order,
                     source_row_number,
                     is_deleted,
+                    completed_at,
                     first_seen_at,
                     last_seen_at,
                     created_run_id,
@@ -683,6 +704,7 @@ class TaskWarehouseStore:
                     source_order,
                     source_row_number,
                     FALSE,
+                    CASE WHEN done THEN NOW() ELSE NULL END,
                     NOW(),
                     NOW(),
                     %s,
@@ -709,6 +731,11 @@ class TaskWarehouseStore:
                     source_order = EXCLUDED.source_order,
                     source_row_number = EXCLUDED.source_row_number,
                     is_deleted = FALSE,
+                    completed_at = CASE
+                        WHEN EXCLUDED.done = FALSE THEN NULL
+                        WHEN warehouse.tasks_current.done = FALSE THEN NOW()
+                        ELSE COALESCE(warehouse.tasks_current.completed_at, NOW())
+                    END,
                     last_seen_at = NOW(),
                     last_run_id = EXCLUDED.last_run_id,
                     updated_at = NOW()
@@ -751,7 +778,8 @@ class TaskWarehouseStore:
                     target.source_name,
                     target.source_kind,
                     target.source_sheet,
-                    target.source_path
+                    target.source_path,
+                    target.completed_at
                 """,
                 (run_id, source_names, run_id),
             )
@@ -778,6 +806,7 @@ class TaskWarehouseStore:
                 str(row["source_kind"]),
                 str(row["source_sheet"]),
                 str(row["source_path"]),
+                _to_optional_datetime(row["completed_at"]),
             )
             for row in deleted_rows
         ]
@@ -802,9 +831,10 @@ class TaskWarehouseStore:
                     source_name,
                     source_kind,
                     source_sheet,
-                    source_path
+                    source_path,
+                    completed_at
                 )
-                VALUES (%s, %s, %s, 'deleted', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, 'deleted', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 history_rows,
             )
@@ -816,3 +846,7 @@ def load_tasks_from_database(database_url: str) -> list[Task]:
     with psycopg.connect(database_url) as connection:
         store = TaskWarehouseStore(connection)
         return store.load_current_tasks()
+
+
+def _to_optional_datetime(value: object) -> datetime | None:
+    return value if isinstance(value, datetime) else None
