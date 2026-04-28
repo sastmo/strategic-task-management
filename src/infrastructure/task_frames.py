@@ -310,6 +310,11 @@ def frame_to_tasks(df: pd.DataFrame) -> list[Task]:
             progress=int(row["progress"]),
             done=bool(row["done"]),
             paused=bool(row["paused"]),
+            completed_at=(
+                row["completed_at"]
+                if "completed_at" in df.columns and pd.notna(row["completed_at"])
+                else None
+            ),
         )
         for _, row in df.iterrows()
     ]

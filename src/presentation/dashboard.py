@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
 from functools import lru_cache
 from html import escape
 import json
 from pathlib import Path
 
-from src.domain.tasks import Task, normalize_owner, task_status
+from src.domain.tasks import Task, normalize_owner, owner_view_visible, task_status
 
 BG = "#161a20"
 PANEL = "#1d2229"
@@ -19,6 +20,7 @@ TEXT_MUTED3 = "#cfd6df"
 DONE_GREEN = "#22c55e"
 PAUSED_GRAY = "#94a3b8"
 ACTIVE_BLUE = "#5cc8ff"
+OWNER_DONE_RETENTION_DAYS = 14
 
 FALLBACK_OWNER_COLORS = [
     "#38bdf8",
@@ -94,6 +96,23 @@ def owner_groups(tasks: list[Task]) -> dict[str, list[Task]]:
     return groups
 
 
+def owner_view_tasks(
+    tasks: list[Task],
+    *,
+    now: datetime | None = None,
+    done_retention_days: int = OWNER_DONE_RETENTION_DAYS,
+) -> list[Task]:
+    return [
+        task
+        for task in tasks
+        if owner_view_visible(
+            task,
+            now=now,
+            done_retention_days=done_retention_days,
+        )
+    ]
+
+
 def active_index_by_owner(tasks: list[Task]) -> dict[str, dict[str, int]]:
     index_map: dict[str, dict[str, int]] = {}
 
@@ -147,8 +166,18 @@ def build_task_payload(tasks: list[Task]) -> list[dict[str, object]]:
     return payload
 
 
-def owner_cards_html(tasks: list[Task]) -> str:
-    groups = owner_groups(tasks)
+def owner_cards_html(
+    tasks: list[Task],
+    *,
+    now: datetime | None = None,
+    done_retention_days: int = OWNER_DONE_RETENTION_DAYS,
+) -> str:
+    visible_tasks = owner_view_tasks(
+        tasks,
+        now=now,
+        done_retention_days=done_retention_days,
+    )
+    groups = owner_groups(visible_tasks)
     ordered_owners = list(groups.keys())
     overall_progress = {
         owner: round(sum(task.progress for task in items) / len(items)) if items else 0
@@ -260,9 +289,18 @@ def render_dashboard_template(replacements: dict[str, str]) -> str:
     return html
 
 
-def build_dashboard_html(tasks: list[Task]) -> str:
+def build_dashboard_html(
+    tasks: list[Task],
+    *,
+    now: datetime | None = None,
+    done_retention_days: int = OWNER_DONE_RETENTION_DAYS,
+) -> str:
     tasks_json = json.dumps(build_task_payload(tasks))
-    owners_html = owner_cards_html(tasks)
+    owners_html = owner_cards_html(
+        tasks,
+        now=now,
+        done_retention_days=done_retention_days,
+    )
     role_legend = "".join(
         f'<div class="role-chip"><span class="role-swatch" style="background:{owner_color(owner)}"></span>{escape(owner)}</div>'
         for owner in owner_order(tasks)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import time
@@ -10,7 +11,7 @@ import pandas as pd
 from src.application.auto_sync import build_source_snapshot, determine_sync_reason
 from src.application.task_workflow import load_task_batch
 from src.domain.tasks import Task
-from src.presentation.dashboard import build_dashboard_html
+from src.presentation.dashboard import build_dashboard_html, owner_cards_html
 
 
 class ApplicationBehaviorTests(unittest.TestCase):
@@ -157,6 +158,46 @@ class ApplicationBehaviorTests(unittest.TestCase):
         self.assertIn("<!doctype html>", html)
         self.assertIn("Strategic Positioning", html)
         self.assertNotIn("__TASKS_JSON__", html)
+
+    def test_owner_cards_hide_done_tasks_older_than_retention_window(self) -> None:
+        now = datetime(2026, 4, 26, tzinfo=timezone.utc)
+        html = owner_cards_html(
+            [
+                Task(
+                    id="active-1",
+                    name="Active Task",
+                    owner="Ops",
+                    current_impact=50,
+                    future_impact=70,
+                    progress=40,
+                ),
+                Task(
+                    id="done-old",
+                    name="Old Done Task",
+                    owner="Ops",
+                    current_impact=60,
+                    future_impact=80,
+                    progress=100,
+                    done=True,
+                    completed_at=now - timedelta(days=20),
+                ),
+                Task(
+                    id="done-recent",
+                    name="Recent Done Task",
+                    owner="Ops",
+                    current_impact=65,
+                    future_impact=82,
+                    progress=100,
+                    done=True,
+                    completed_at=now - timedelta(days=4),
+                ),
+            ],
+            now=now,
+        )
+
+        self.assertIn("Active Task", html)
+        self.assertIn("Recent Done Task", html)
+        self.assertNotIn("Old Done Task", html)
 
 
 if __name__ == "__main__":
