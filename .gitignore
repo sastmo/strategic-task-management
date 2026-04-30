@@ -26,8 +26,10 @@ _uploaded_tasks.csv
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pycache_temp/
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 
 # Logs
