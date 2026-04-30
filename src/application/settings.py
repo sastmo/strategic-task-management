@@ -6,7 +6,6 @@ import os
 from src.domain.identity import AppRole, normalize_role_collection
 
 
-DEFAULT_DATABASE_URL = "postgresql://stm_user:stm_password@db:5432/strategic_tasks"
 DEFAULT_LOCAL_USER_EMAIL = "local.admin@example.com"
 SUPPORTED_AUTH_MODES = {"local", "app_service", "disabled"}
 
@@ -15,8 +14,14 @@ def env_flag(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def load_database_url() -> str:
-    return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+def load_database_url(*, required: bool = False) -> str:
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if required and not database_url:
+        raise RuntimeError(
+            "DATABASE_URL is required for this runtime path. "
+            "Set it in your environment or container configuration."
+        )
+    return database_url
 
 
 def env_list(name: str, default: str = "") -> tuple[str, ...]:
@@ -136,6 +141,7 @@ def load_app_settings(default_source: str) -> AppSettings:
 
 def load_auto_sync_settings(default_source: str) -> AutoSyncSettings:
     source_input = load_sync_source_input(default_source)
+    database_url = load_database_url(required=True)
     poll_seconds = max(
         5,
         int(os.getenv("SYNC_POLL_SECONDS", os.getenv("SYNC_INTERVAL_SECONDS", "30"))),
@@ -151,7 +157,7 @@ def load_auto_sync_settings(default_source: str) -> AutoSyncSettings:
 
     return AutoSyncSettings(
         source_input=source_input,
-        database_url=load_database_url(),
+        database_url=database_url,
         poll_seconds=poll_seconds,
         refresh_seconds=refresh_seconds,
         retry_seconds=retry_seconds,

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Compatibility entrypoint for the task sync workflow."""
+
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ def sync_to_db(source: Any, database_url: str) -> dict[str, int | str]:
 
 
 if __name__ == "__main__":
-    sync_to_database(DEFAULT_SYNC_SOURCE, DATABASE_URL)
+    sync_to_database(DEFAULT_SYNC_SOURCE, load_database_url(required=True))
 
 
 __all__ = [

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import glob
 from io import BytesIO
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -17,6 +18,7 @@ SourceSpec = str | dict[str, Any]
 SourceList = list[SourceSpec]
 
 SUPPORTED_FILE_SUFFIXES = {".csv", ".json", ".xls", ".xlsx"}
+TASK_SOURCE_ROOT_ENV = "TASK_SOURCE_ROOT"
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,9 +128,7 @@ def is_graph_source_spec_dict(value: object) -> bool:
 def is_source_spec_dict(value: object) -> bool:
     return isinstance(value, dict) and (
         is_graph_source_spec_dict(value)
-        or any(
-        key in value for key in ("source", "path", "url", "glob")
-        )
+        or any(key in value for key in ("source", "path", "url", "glob"))
     )
 
 
@@ -211,6 +211,28 @@ def build_graph_source_value(
     drive_marker = drive_name or drive_id or "default-drive"
     item_marker = (file_path or item_id or "graph-item").lstrip("/")
     return f"graph://{site_marker}::{drive_marker}::{item_marker}"
+
+
+def configured_source_root() -> Path | None:
+    raw_value = os.getenv(TASK_SOURCE_ROOT_ENV, "").strip()
+    if not raw_value:
+        return None
+    return Path(raw_value).expanduser().resolve()
+
+
+def ensure_local_source_allowed(path: str | Path, *, source_root: Path | None = None) -> None:
+    allowed_root = source_root or configured_source_root()
+    if allowed_root is None:
+        return
+
+    resolved_path = Path(path).expanduser().resolve()
+    try:
+        resolved_path.relative_to(allowed_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"Local task sources must stay within {allowed_root}. "
+            f"Received: {resolved_path}"
+        ) from exc
 
 
 def normalize_source_spec(
@@ -297,6 +319,7 @@ def expand_source_spec(source: SourceSpec, *, start_order: int) -> list[Resolved
         expanded: list[ResolvedSourceSpec] = []
 
         for offset, match in enumerate(matches):
+            ensure_local_source_allowed(match)
             spec = dict(source)
             spec.pop("glob", None)
             spec.pop("recursive", None)
@@ -311,11 +334,15 @@ def expand_source_spec(source: SourceSpec, *, start_order: int) -> list[Resolved
     explicit_source_name = isinstance(source, dict) and "source_name" in source
 
     if not normalized.source.startswith(("http://", "https://")) and source_path.is_dir():
+        ensure_local_source_allowed(source_path)
         matches = sorted(
             str(path)
             for path in source_path.iterdir()
             if path.is_file() and path.suffix.lower() in SUPPORTED_FILE_SUFFIXES
         )
+
+        for match in matches:
+            ensure_local_source_allowed(match)
 
         return [
             ResolvedSourceSpec(
@@ -328,6 +355,11 @@ def expand_source_spec(source: SourceSpec, *, start_order: int) -> list[Resolved
             )
             for offset, match in enumerate(matches)
         ]
+
+    if normalized.kind != "graph" and not normalized.source.startswith(
+        ("http://", "https://", "postgres://", "postgresql://")
+    ):
+        ensure_local_source_allowed(normalized.source)
 
     return [normalized]
 

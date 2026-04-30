@@ -110,6 +110,7 @@ def resolve_request_authorization(
             sign_out_url=sign_out_url,
         )
 
+    user: AuthenticatedUser | None
     if settings.mode == "local":
         user = build_local_user(settings)
     else:

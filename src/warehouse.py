@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Compatibility layer for warehouse storage helpers."""
+
+from __future__ import annotations
 
 from typing import Any
 

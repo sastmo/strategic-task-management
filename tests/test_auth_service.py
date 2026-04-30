@@ -78,6 +78,8 @@ class AuthServiceTests(unittest.TestCase):
 
         self.assertTrue(auth_context.is_authorized)
         self.assertEqual(auth_context.permissions.primary_role, "admin")
+        self.assertIsNotNone(auth_context.user)
+        assert auth_context.user is not None
         self.assertEqual(auth_context.user.email, "admin@example.com")
 
     def test_resolve_request_authorization_combines_group_and_database_roles(self) -> None:

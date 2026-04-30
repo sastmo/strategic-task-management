@@ -21,6 +21,7 @@ DONE_GREEN = "#22c55e"
 PAUSED_GRAY = "#94a3b8"
 ACTIVE_BLUE = "#5cc8ff"
 OWNER_DONE_RETENTION_DAYS = 14
+OWNER_CARD_VISIBLE_LIMIT = 3
 
 FALLBACK_OWNER_COLORS = [
     "#38bdf8",
@@ -223,8 +224,8 @@ def owner_cards_html(
 
     for owner in ordered_owners:
         items = groups[owner]
-        visible_items = items[:3]
-        extra_items = items[3:]
+        visible_items = items[:OWNER_CARD_VISIBLE_LIMIT]
+        extra_items = items[OWNER_CARD_VISIBLE_LIMIT:]
         visible_cards = (
             "\n".join(render_task(task) for task in visible_items)
             if visible_items
