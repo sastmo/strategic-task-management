@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 
 from src.domain.identity import AppRole, normalize_role_collection
 
-
 DEFAULT_LOCAL_USER_EMAIL = "local.admin@example.com"
 SUPPORTED_AUTH_MODES = {"local", "app_service", "disabled"}
+_DEFAULT_PROXY_HEADER = "X-Proxy-Auth"
 
 
 def env_flag(name: str, default: str = "false") -> bool:
@@ -70,7 +70,7 @@ class AppSettings:
     database_url: str
     refresh_ms: int
     dashboard_height: int
-    auth: "AuthSettings"
+    auth: AuthSettings
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +90,9 @@ class AuthSettings:
     admin_group_ids: tuple[str, ...]
     app_service_provider: str
     show_status_panel: bool
+    trusted_proxy_secret: str
+    trusted_proxy_header: str
+    allow_unverified_proxy: bool
 
     @property
     def uses_database(self) -> bool:
@@ -108,6 +111,16 @@ class AutoSyncSettings:
 
 def load_auth_settings() -> AuthSettings:
     mode = normalize_auth_mode(os.getenv("AUTH_MODE", "local"))
+
+    if mode == "local":
+        environment = os.getenv("ENVIRONMENT", "").strip().lower()
+        if environment == "production" and not env_flag("ALLOW_LOCAL_AUTH_IN_PRODUCTION"):
+            raise RuntimeError(
+                "AUTH_MODE=local is not allowed when ENVIRONMENT=production. "
+                "Switch to AUTH_MODE=app_service or set ALLOW_LOCAL_AUTH_IN_PRODUCTION=1 "
+                "to override (not recommended for real deployments)."
+            )
+
     local_user_email = os.getenv("AUTH_LOCAL_USER_EMAIL", DEFAULT_LOCAL_USER_EMAIL).strip().lower()
 
     return AuthSettings(
@@ -126,6 +139,10 @@ def load_auth_settings() -> AuthSettings:
         admin_group_ids=env_list("AUTH_ADMIN_GROUP_IDS"),
         app_service_provider=os.getenv("AUTH_APP_SERVICE_PROVIDER", "aad").strip() or "aad",
         show_status_panel=env_flag("APP_AUTH_SHOW_STATUS", "true"),
+        trusted_proxy_secret=os.getenv("APP_TRUSTED_PROXY_SECRET", "").strip(),
+        trusted_proxy_header=os.getenv("APP_TRUSTED_PROXY_HEADER", _DEFAULT_PROXY_HEADER).strip()
+        or _DEFAULT_PROXY_HEADER,
+        allow_unverified_proxy=env_flag("AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY"),
     )
 
 

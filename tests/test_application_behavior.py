@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import tempfile
 import time
 import unittest
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest import mock
 
 import pandas as pd
@@ -203,7 +203,7 @@ class ApplicationBehaviorTests(unittest.TestCase):
         self.assertNotIn("__TASKS_JSON__", html)
 
     def test_owner_cards_hide_done_tasks_older_than_retention_window(self) -> None:
-        now = datetime(2026, 4, 26, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 26, tzinfo=UTC)
         html = owner_cards_html(
             [
                 Task(

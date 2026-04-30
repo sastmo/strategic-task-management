@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
-from functools import lru_cache
-from html import escape
 import json
+from datetime import datetime
+from functools import cache, lru_cache
+from html import escape
 from pathlib import Path
 
 from src.domain.tasks import Task, normalize_owner, owner_view_visible, task_status
@@ -277,7 +277,7 @@ def load_dashboard_template() -> str:
     return template_path.read_text(encoding="utf-8")
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_dashboard_asset(name: str) -> str:
     asset_path = Path(__file__).resolve().parent / "assets" / name
     return asset_path.read_text(encoding="utf-8")

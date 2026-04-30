@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from contextlib import AbstractContextManager, nullcontext
 import logging
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 from uuid import uuid4
 
@@ -16,8 +16,11 @@ from src.application.auth_service import (
     resolve_request_authorization,
 )
 from src.application.settings import AppSettings, load_app_settings
-from src.infrastructure.user_repository import UserAccessRepository, open_user_access_repository
-from src.loader import load_tasks
+from src.application.task_workflow import load_tasks
+from src.infrastructure.user_repository import (
+    UserAccessRepository,
+    open_user_access_repository,
+)
 from src.presentation import (
     STREAMLIT_CHROME_STYLE,
     build_dashboard_html,
@@ -38,7 +41,14 @@ def session_id() -> str:
 
 
 def request_headers() -> dict[str, str]:
-    return dict(st.context.headers.items())
+    try:
+        return dict(st.context.headers.items())
+    except AttributeError as exc:
+        raise RuntimeError(
+            f"Could not read request headers from Streamlit context "
+            f"(streamlit=={st.__version__}). "
+            "This application requires streamlit>=1.34 with st.context.headers support."
+        ) from exc
 
 
 def open_user_repository(

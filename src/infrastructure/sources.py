@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import glob
-from io import BytesIO
 import json
 import os
+from collections.abc import Callable
+from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pandas as pd
 import requests

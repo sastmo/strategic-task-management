@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Final, Iterable, Literal
+from typing import Final, Literal
 
 from src.domain.tasks import text_or_blank
 

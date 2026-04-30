@@ -1,22 +1,22 @@
 from __future__ import annotations
 
-from contextlib import closing
 import os
 import types
 import unittest
+from contextlib import closing
 
 import pandas as pd
 
 try:
     import psycopg
 except ImportError:  # pragma: no cover - optional local dependency
-    psycopg = None
+    psycopg = None  # type: ignore[assignment]
 
-task_store_module: types.ModuleType | None
+task_store_module: types.ModuleType | None = None
 try:
     import src.infrastructure.task_store as task_store_module
 except ImportError:  # pragma: no cover - optional local dependency
-    task_store_module = None
+    pass
 
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "").strip()
@@ -161,9 +161,11 @@ class TaskStoreIntegrationTests(unittest.TestCase):
             deleted_row = cursor.fetchone()
 
             cursor.execute("SELECT COUNT(*) FROM warehouse.task_history")
-            history_count = cursor.fetchone()[0]
+            count_row = cursor.fetchone()
+            history_count = count_row[0] if count_row is not None else 0
 
         self.assertIsNotNone(deleted_row)
+        assert deleted_row is not None
         self.assertTrue(deleted_row[0])
         self.assertGreaterEqual(history_count, 3)
 
