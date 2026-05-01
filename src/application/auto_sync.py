@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import logging
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 from src.application.settings import AutoSyncSettings, load_auto_sync_settings
-from src.infrastructure.sources import detect_source_kind, expand_source_specs, parse_source_config
+from src.infrastructure.sources import (
+    detect_source_kind,
+    expand_source_specs,
+    parse_source_config,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -96,6 +101,12 @@ class AutoSyncMonitor:
                 self.last_success_at = self.monotonic()
                 self.last_attempt_failed = False
             except Exception as exc:
+                from src.application.task_sync import SyncLockConflict
+
+                if isinstance(exc, SyncLockConflict):
+                    self.printer(f"Auto sync skipped: {exc}")
+                    self.sleep(self.settings.poll_seconds)
+                    continue
                 self.last_attempt_failed = True
                 self.printer(f"Auto sync failed: {exc}")
                 _logger.exception("Auto sync failed")
@@ -237,3 +248,7 @@ def run_auto_sync(
 
     monitor = AutoSyncMonitor(settings)
     monitor.run_forever()
+
+
+if __name__ == "__main__":
+    run_auto_sync()

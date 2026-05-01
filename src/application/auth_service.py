@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-from typing import Any, Mapping, Protocol
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 from src.application.settings import AuthSettings
 from src.domain.identity import (
-    AuthState,
     AppRole,
     AuthenticatedUser,
+    AuthState,
     PermissionSet,
     build_user_key,
     normalize_email,
@@ -67,6 +68,35 @@ class AuthorizationContext:
         return self.state == "authorized" and self.permissions.can_view
 
 
+def _check_trusted_proxy(
+    headers: Mapping[str, Any],
+    settings: AuthSettings,
+) -> str | None:
+    """Return an error message if proxy verification fails, None if the request is trusted."""
+    if settings.trusted_proxy_secret:
+        header_key = settings.trusted_proxy_header.lower()
+        incoming = str(headers.get(header_key, headers.get(settings.trusted_proxy_header, ""))).strip()
+        if incoming != settings.trusted_proxy_secret:
+            return (
+                "Request did not include a valid proxy authorization header. "
+                "Ensure the request passes through the configured trusted proxy."
+            )
+        return None
+
+    if not settings.allow_unverified_proxy:
+        return (
+            "APP_TRUSTED_PROXY_SECRET is not configured for app_service auth mode. "
+            "Set APP_TRUSTED_PROXY_SECRET to a shared secret injected by your reverse proxy, "
+            "or set AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY=1 to skip this check (development only)."
+        )
+
+    _logger.warning(
+        "app_service auth is running without proxy secret validation "
+        "(AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY=1). Do not use in production."
+    )
+    return None
+
+
 def build_local_user(settings: AuthSettings) -> AuthenticatedUser:
     return AuthenticatedUser(
         user_key=build_user_key(email=settings.local_user_email),
@@ -110,9 +140,21 @@ def resolve_request_authorization(
             sign_out_url=sign_out_url,
         )
 
+    user: AuthenticatedUser | None
     if settings.mode == "local":
         user = build_local_user(settings)
     else:
+        proxy_error = _check_trusted_proxy(headers, settings)
+        if proxy_error is not None:
+            return AuthorizationContext(
+                state="access_denied",
+                user=None,
+                permissions=PermissionSet(),
+                message=proxy_error,
+                auth_mode=settings.mode,
+                sign_in_url=sign_in_url,
+                sign_out_url=sign_out_url,
+            )
         try:
             user = parse_app_service_user(headers)
         except Exception as exc:

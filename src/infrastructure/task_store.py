@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
 import json
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -583,6 +583,8 @@ class TaskWarehouseStore:
             )
             row = cursor.fetchone()
 
+        if row is None:
+            return {"inserted_count": 0, "updated_count": 0, "unchanged_count": 0}
         return {
             "inserted_count": int(row["inserted_count"] or 0),
             "updated_count": int(row["updated_count"] or 0),

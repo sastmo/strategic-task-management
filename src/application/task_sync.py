@@ -1,12 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import hashlib
 import logging
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from src.application.task_workflow import load_task_batch
 
 _logger = logging.getLogger(__name__)
+
+_SYNC_LOCK_KEY = int.from_bytes(
+    hashlib.sha256(b"strategic_task_sync").digest()[:8], "big"
+) % (2**63)
+
+
+class SyncLockConflict(Exception):
+    """Raised when the advisory lock cannot be acquired because another sync is running."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +54,15 @@ def sync_to_database(source_input: Any, database_url: str) -> SyncSummary:
     source_config_payload = batch.source_config_payload()
 
     with psycopg.connect(database_url) as connection:
+        with connection.cursor() as _cursor:
+            _cursor.execute("SELECT pg_try_advisory_lock(%s)", (_SYNC_LOCK_KEY,))
+            acquired = _cursor.fetchone()
+        connection.rollback()
+        if not acquired or not acquired[0]:
+            raise SyncLockConflict(
+                "Another sync process holds the advisory lock; skipping this cycle."
+            )
+
         store = TaskWarehouseStore(connection)
         store.ensure_database_objects()
 

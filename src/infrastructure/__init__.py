@@ -42,6 +42,23 @@ __all__ = [
 
 
 if TYPE_CHECKING:
+    from src.infrastructure.auth.app_service import (
+        build_app_service_login_url,
+        build_app_service_logout_url,
+        decode_client_principal,
+        parse_app_service_user,
+    )
+    from src.infrastructure.azure.credentials import (
+        get_default_azure_credential,
+        has_azure_identity_support,
+    )
+    from src.infrastructure.graph.client import (
+        GraphAuthSettings,
+        GraphDownloadedFile,
+        GraphFileClient,
+        load_graph_auth_settings,
+        parse_site_url,
+    )
     from src.infrastructure.sources import (
         ResolvedSourceSpec,
         SourceList,
@@ -65,23 +82,9 @@ if TYPE_CHECKING:
         normalize_task_frame,
         resolve_current_frame,
     )
-    from src.infrastructure.task_store import TaskWarehouseStore, load_tasks_from_database
-    from src.infrastructure.auth.app_service import (
-        build_app_service_login_url,
-        build_app_service_logout_url,
-        decode_client_principal,
-        parse_app_service_user,
-    )
-    from src.infrastructure.azure.credentials import (
-        get_default_azure_credential,
-        has_azure_identity_support,
-    )
-    from src.infrastructure.graph.client import (
-        GraphAuthSettings,
-        GraphDownloadedFile,
-        GraphFileClient,
-        load_graph_auth_settings,
-        parse_site_url,
+    from src.infrastructure.task_store import (
+        TaskWarehouseStore,
+        load_tasks_from_database,
     )
     from src.infrastructure.user_repository import (
         UserAccessRepository,

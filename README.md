@@ -18,6 +18,12 @@ docker compose up --build
 
 The app is available at `http://localhost:8501`.
 
+For a direct Python run instead of Docker:
+
+```bash
+./run.sh
+```
+
 ---
 
 ## Data sources
@@ -57,6 +63,16 @@ GRAPH_CLIENT_ID=...
 GRAPH_CLIENT_SECRET=...
 ```
 
+### Large CSV handling
+
+For large CSV sources, you can ask the loader to read the file in smaller batches:
+
+```env
+TASK_CSV_CHUNK_ROWS=5000
+```
+
+This keeps the sync model snapshot-based, but lowers peak memory during CSV ingestion by processing the file in smaller DataFrame chunks before the final merge.
+
 ---
 
 ## Authentication
@@ -88,5 +104,26 @@ assets/                 Screenshots and static files
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -v
+python3.12 -m unittest discover -s tests -v
+python3.12 -m mypy
+ruff check .
 ```
+
+Optional integration test:
+
+```bash
+TEST_DATABASE_URL=postgresql://... python3.12 -m unittest tests.test_task_store_integration -v
+```
+
+---
+
+## Production handoff
+
+For Azure/App Service production:
+
+- keep the same app code
+- set `AUTH_MODE=app_service`
+- store secrets in Azure configuration or a secret manager, not in git
+- use one Graph app registration for the sync worker and Azure/App Service auth for website login
+- keep the database as the live read layer for the app
+- use `TASK_SOURCE_ROOT` when mounting local folders in dev or worker environments

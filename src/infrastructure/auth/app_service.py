@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import base64
-from collections import defaultdict
 import json
-from typing import Any, Iterable, Mapping
+from collections import defaultdict
+from collections.abc import Iterable, Mapping
+from typing import Any
 from urllib.parse import quote
 
 from src.domain.identity import (
@@ -62,7 +63,7 @@ def normalize_headers(headers: Mapping[str, Any]) -> dict[str, str]:
         if not header_name:
             continue
 
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, list | tuple):
             header_value = next(
                 (text_or_blank(item) for item in value if text_or_blank(item)),
                 "",

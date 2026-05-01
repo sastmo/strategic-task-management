@@ -44,11 +44,12 @@ def load_task_batch(source_input: SourceSpec | SourceList | dict[str, Any]) -> L
     source_config = parse_source_config(source_input)
     resolved_sources = expand_source_specs(list(source_config.sources))
 
-    raw_frames: list[pd.DataFrame] = []
+    normalized_frames: list[pd.DataFrame] = []
+    frame_count = 0
     for source in resolved_sources:
-        raw_frames.extend(read_source_spec_to_frames(source))
-
-    normalized_frames = [normalize_task_frame(frame) for frame in raw_frames]
+        for frame in read_source_spec_to_frames(source):
+            normalized_frames.append(normalize_task_frame(frame))
+            frame_count += 1
     staged_frame = (
         pd.concat(normalized_frames, ignore_index=True)
         if normalized_frames
@@ -64,7 +65,7 @@ def load_task_batch(source_input: SourceSpec | SourceList | dict[str, Any]) -> L
         resolved_sources=resolved_sources,
         staged_frame=staged_frame,
         current_frame=current_frame,
-        frame_count=len(raw_frames),
+        frame_count=frame_count,
         source_count=len(resolved_sources),
     )
 

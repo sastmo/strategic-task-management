@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import unittest
+from datetime import UTC, datetime, timedelta
 
 from src.domain.tasks import (
     Task,
@@ -40,8 +40,21 @@ class TaskDomainTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             normalize_union_mode("merge")
 
+    def test_owner_view_visible_done_with_no_completed_at_is_always_visible(self) -> None:
+        task = Task(
+            id="t-no-date",
+            name="No completion date",
+            owner="Ops",
+            current_impact=50,
+            future_impact=60,
+            progress=100,
+            done=True,
+            completed_at=None,
+        )
+        self.assertTrue(owner_view_visible(task))
+
     def test_owner_view_visible_hides_old_done_tasks(self) -> None:
-        now = datetime(2026, 4, 26, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 26, tzinfo=UTC)
         old_done_task = Task(
             id="t-2",
             name="Archive me",

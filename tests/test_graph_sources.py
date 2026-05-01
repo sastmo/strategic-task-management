@@ -37,6 +37,21 @@ class GraphSourceTests(unittest.TestCase):
         self.assertEqual(site_reference.hostname, "contoso.sharepoint.com")
         self.assertEqual(site_reference.path, "/sites/Strategy")
 
+    def test_graph_auth_settings_repr_redacts_client_secret(self) -> None:
+        from src.infrastructure.graph.client import GraphAuthSettings
+
+        settings = GraphAuthSettings(
+            auth_mode="client_secret",
+            tenant_id="tenant-1",
+            client_id="client-1",
+            client_secret="super-secret-value",
+        )
+        representation = repr(settings)
+
+        self.assertNotIn("super-secret-value", representation)
+        self.assertIn("[REDACTED]", representation)
+        self.assertIn("client_secret", representation)
+
     def test_load_graph_auth_settings_prefers_client_secret_when_present(self) -> None:
         with patch.dict(
             "os.environ",

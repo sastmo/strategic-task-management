@@ -1,22 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 
 from src.domain.identity import AppRole, normalize_role_collection
 
-
-DEFAULT_DATABASE_URL = "postgresql://stm_user:stm_password@db:5432/strategic_tasks"
 DEFAULT_LOCAL_USER_EMAIL = "local.admin@example.com"
 SUPPORTED_AUTH_MODES = {"local", "app_service", "disabled"}
+_DEFAULT_PROXY_HEADER = "X-Proxy-Auth"
 
 
 def env_flag(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def load_database_url() -> str:
-    return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+def load_database_url(*, required: bool = False) -> str:
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if required and not database_url:
+        raise RuntimeError(
+            "DATABASE_URL is required for this runtime path. "
+            "Set it in your environment or container configuration."
+        )
+    return database_url
 
 
 def env_list(name: str, default: str = "") -> tuple[str, ...]:
@@ -65,7 +70,7 @@ class AppSettings:
     database_url: str
     refresh_ms: int
     dashboard_height: int
-    auth: "AuthSettings"
+    auth: AuthSettings
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +90,9 @@ class AuthSettings:
     admin_group_ids: tuple[str, ...]
     app_service_provider: str
     show_status_panel: bool
+    trusted_proxy_secret: str
+    trusted_proxy_header: str
+    allow_unverified_proxy: bool
 
     @property
     def uses_database(self) -> bool:
@@ -103,6 +111,16 @@ class AutoSyncSettings:
 
 def load_auth_settings() -> AuthSettings:
     mode = normalize_auth_mode(os.getenv("AUTH_MODE", "local"))
+
+    if mode == "local":
+        environment = os.getenv("ENVIRONMENT", "").strip().lower()
+        if environment == "production" and not env_flag("ALLOW_LOCAL_AUTH_IN_PRODUCTION"):
+            raise RuntimeError(
+                "AUTH_MODE=local is not allowed when ENVIRONMENT=production. "
+                "Switch to AUTH_MODE=app_service or set ALLOW_LOCAL_AUTH_IN_PRODUCTION=1 "
+                "to override (not recommended for real deployments)."
+            )
+
     local_user_email = os.getenv("AUTH_LOCAL_USER_EMAIL", DEFAULT_LOCAL_USER_EMAIL).strip().lower()
 
     return AuthSettings(
@@ -121,6 +139,10 @@ def load_auth_settings() -> AuthSettings:
         admin_group_ids=env_list("AUTH_ADMIN_GROUP_IDS"),
         app_service_provider=os.getenv("AUTH_APP_SERVICE_PROVIDER", "aad").strip() or "aad",
         show_status_panel=env_flag("APP_AUTH_SHOW_STATUS", "true"),
+        trusted_proxy_secret=os.getenv("APP_TRUSTED_PROXY_SECRET", "").strip(),
+        trusted_proxy_header=os.getenv("APP_TRUSTED_PROXY_HEADER", _DEFAULT_PROXY_HEADER).strip()
+        or _DEFAULT_PROXY_HEADER,
+        allow_unverified_proxy=env_flag("AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY"),
     )
 
 
@@ -136,6 +158,7 @@ def load_app_settings(default_source: str) -> AppSettings:
 
 def load_auto_sync_settings(default_source: str) -> AutoSyncSettings:
     source_input = load_sync_source_input(default_source)
+    database_url = load_database_url(required=True)
     poll_seconds = max(
         5,
         int(os.getenv("SYNC_POLL_SECONDS", os.getenv("SYNC_INTERVAL_SECONDS", "30"))),
@@ -151,7 +174,7 @@ def load_auto_sync_settings(default_source: str) -> AutoSyncSettings:
 
     return AutoSyncSettings(
         source_input=source_input,
-        database_url=load_database_url(),
+        database_url=database_url,
         poll_seconds=poll_seconds,
         refresh_seconds=refresh_seconds,
         retry_seconds=retry_seconds,

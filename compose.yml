@@ -1,9 +1,9 @@
 x-db-env: &db-env
   POSTGRES_DB: ${POSTGRES_DB:-strategic_tasks}
   POSTGRES_USER: ${POSTGRES_USER:-stm_user}
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stm_password}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or your shell}
 
-x-database-url: &database-url "postgresql://${POSTGRES_USER:-stm_user}:${POSTGRES_PASSWORD:-stm_password}@db:5432/${POSTGRES_DB:-strategic_tasks}"
+x-database-url: &database-url "postgresql://${POSTGRES_USER:-stm_user}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or your shell}@db:5432/${POSTGRES_DB:-strategic_tasks}"
 
 services:
   db:
@@ -38,6 +38,8 @@ services:
       GRAPH_BASE_URL: ${GRAPH_BASE_URL:-https://graph.microsoft.com/v1.0}
       GRAPH_TIMEOUT_SECONDS: ${GRAPH_TIMEOUT_SECONDS:-30}
       SYNC_SOURCE: ${SYNC_SOURCE:-/app/data}
+      TASK_SOURCE_ROOT: ${TASK_SOURCE_ROOT:-/app/data}
+      TASK_CSV_CHUNK_ROWS: ${TASK_CSV_CHUNK_ROWS:-}
       SYNC_POLL_SECONDS: ${SYNC_POLL_SECONDS:-30}
       SYNC_REFRESH_SECONDS: ${SYNC_REFRESH_SECONDS:-1800}
       SYNC_RETRY_SECONDS: ${SYNC_RETRY_SECONDS:-120}
@@ -65,6 +67,8 @@ services:
       GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
       GRAPH_BASE_URL: ${GRAPH_BASE_URL:-https://graph.microsoft.com/v1.0}
       GRAPH_TIMEOUT_SECONDS: ${GRAPH_TIMEOUT_SECONDS:-30}
+      TASK_SOURCE_ROOT: ${TASK_SOURCE_ROOT:-/app/data}
+      TASK_CSV_CHUNK_ROWS: ${TASK_CSV_CHUNK_ROWS:-}
       AUTH_MODE: ${AUTH_MODE:-local}
       AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
       AUTH_REQUIRE_EXPLICIT_ACCESS: ${AUTH_REQUIRE_EXPLICIT_ACCESS:-false}
