@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import re
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Final, Literal
 
 UnionMode = Literal["union", "union_all"]
@@ -145,10 +145,10 @@ def owner_view_visible(
     if task.completed_at is None:
         return True
 
-    reference = now or datetime.now(timezone.utc)
+    reference = now or datetime.now(UTC)
     completed_at = (
         task.completed_at
         if task.completed_at.tzinfo is not None
-        else task.completed_at.replace(tzinfo=timezone.utc)
+        else task.completed_at.replace(tzinfo=UTC)
     )
     return completed_at >= reference - timedelta(days=done_retention_days)

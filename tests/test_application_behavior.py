@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import tempfile
 import time
 import unittest
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from unittest import mock
 
 import pandas as pd
 
@@ -74,6 +75,48 @@ class ApplicationBehaviorTests(unittest.TestCase):
         self.assertEqual(batch.frame_count, 3)
         self.assertEqual(len(batch.staged_frame), 3)
         self.assertEqual(len(batch.current_frame), 2)
+
+    def test_load_task_batch_supports_chunked_csv_ingestion(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            csv_path = workspace / "chunked.csv"
+
+            pd.DataFrame(
+                [
+                    {
+                        "Task ID": "A-1",
+                        "Task Name": "Task A",
+                        "Department": "Ops",
+                        "Current Impact": 20,
+                        "Future Impact": 30,
+                        "Progress": 10,
+                    },
+                    {
+                        "Task ID": "A-2",
+                        "Task Name": "Task B",
+                        "Department": "Ops",
+                        "Current Impact": 40,
+                        "Future Impact": 60,
+                        "Progress": 20,
+                    },
+                    {
+                        "Task ID": "A-3",
+                        "Task Name": "Task C",
+                        "Department": "Ops",
+                        "Current Impact": 50,
+                        "Future Impact": 80,
+                        "Progress": 30,
+                    },
+                ]
+            ).to_csv(csv_path, index=False)
+
+            with mock.patch.dict("os.environ", {"TASK_CSV_CHUNK_ROWS": "2"}, clear=False):
+                batch = load_task_batch(str(csv_path))
+
+        self.assertEqual(batch.source_count, 1)
+        self.assertEqual(batch.frame_count, 2)
+        self.assertEqual(len(batch.staged_frame), 3)
+        self.assertEqual(batch.staged_frame["source_row_number"].tolist(), [1, 2, 3])
 
     def test_determine_sync_reason_covers_start_change_and_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -160,7 +203,7 @@ class ApplicationBehaviorTests(unittest.TestCase):
         self.assertNotIn("__TASKS_JSON__", html)
 
     def test_owner_cards_hide_done_tasks_older_than_retention_window(self) -> None:
-        now = datetime(2026, 4, 26, tzinfo=timezone.utc)
+        now = datetime(2026, 4, 26, tzinfo=UTC)
         html = owner_cards_html(
             [
                 Task(

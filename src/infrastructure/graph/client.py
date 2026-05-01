@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
 import os
 import time
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -31,6 +31,16 @@ class GraphAuthSettings:
     client_secret: str = ""
     base_url: str = "https://graph.microsoft.com/v1.0"
     timeout_seconds: int = 30
+
+    def __repr__(self) -> str:
+        return (
+            f"GraphAuthSettings(auth_mode={self.auth_mode!r}, "
+            f"tenant_id={self.tenant_id!r}, "
+            f"client_id={self.client_id!r}, "
+            f"client_secret='[REDACTED]', "
+            f"base_url={self.base_url!r}, "
+            f"timeout_seconds={self.timeout_seconds!r})"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +167,7 @@ class GraphFileClient:
         self.credential = build_token_credential(settings)
 
     @classmethod
-    def from_env(cls) -> "GraphFileClient":
+    def from_env(cls) -> GraphFileClient:
         return cls(load_graph_auth_settings())
 
     def auth_headers(self, *, accept: str = "application/json") -> dict[str, str]:

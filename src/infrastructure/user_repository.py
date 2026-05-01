@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import json
-from typing import Any, Iterator
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
 
-from src.domain.identity import AuthenticatedUser, normalize_email, normalize_role_collection
+from src.domain.identity import (
+    AuthenticatedUser,
+    normalize_email,
+    normalize_role_collection,
+)
 
 AUTH_SCHEMA_STATEMENTS: tuple[str, ...] = (
     "CREATE SCHEMA IF NOT EXISTS app",
@@ -66,6 +71,11 @@ AUTH_SCHEMA_STATEMENTS: tuple[str, ...] = (
     """
     CREATE INDEX IF NOT EXISTS idx_user_activity_user
     ON app.user_activity_log (user_id, occurred_at DESC)
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_user_activity_session_event
+    ON app.user_activity_log (session_id, event_name)
+    WHERE session_id IS NOT NULL
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_users_email
@@ -186,6 +196,7 @@ class UserAccessRepository:
                 """
                 INSERT INTO app.user_activity_log (user_id, session_id, event_name, payload)
                 VALUES (%s, %s, %s, %s::jsonb)
+                ON CONFLICT (session_id, event_name) WHERE session_id IS NOT NULL DO NOTHING
                 """,
                 (
                     user_id,

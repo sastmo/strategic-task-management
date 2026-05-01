@@ -31,4 +31,4 @@ ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8501", "--server.addres
 
 FROM base AS sync
 
-ENTRYPOINT ["python", "-u", "-m", "src.auto_sync"]
+ENTRYPOINT ["python", "-u", "-m", "src.application.auto_sync"]

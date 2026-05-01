@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import glob
-from io import BytesIO
 import json
+import os
+from collections.abc import Callable
+from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pandas as pd
 import requests
@@ -17,6 +19,8 @@ SourceSpec = str | dict[str, Any]
 SourceList = list[SourceSpec]
 
 SUPPORTED_FILE_SUFFIXES = {".csv", ".json", ".xls", ".xlsx"}
+TASK_SOURCE_ROOT_ENV = "TASK_SOURCE_ROOT"
+TASK_CSV_CHUNK_ROWS_ENV = "TASK_CSV_CHUNK_ROWS"
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,9 +130,7 @@ def is_graph_source_spec_dict(value: object) -> bool:
 def is_source_spec_dict(value: object) -> bool:
     return isinstance(value, dict) and (
         is_graph_source_spec_dict(value)
-        or any(
-        key in value for key in ("source", "path", "url", "glob")
-        )
+        or any(key in value for key in ("source", "path", "url", "glob"))
     )
 
 
@@ -211,6 +213,39 @@ def build_graph_source_value(
     drive_marker = drive_name or drive_id or "default-drive"
     item_marker = (file_path or item_id or "graph-item").lstrip("/")
     return f"graph://{site_marker}::{drive_marker}::{item_marker}"
+
+
+def configured_source_root() -> Path | None:
+    raw_value = os.getenv(TASK_SOURCE_ROOT_ENV, "").strip()
+    if not raw_value:
+        return None
+    return Path(raw_value).expanduser().resolve()
+
+
+def configured_csv_chunk_rows() -> int | None:
+    raw_value = os.getenv(TASK_CSV_CHUNK_ROWS_ENV, "").strip()
+    if not raw_value:
+        return None
+
+    chunk_rows = int(raw_value)
+    if chunk_rows <= 0:
+        raise ValueError(f"{TASK_CSV_CHUNK_ROWS_ENV} must be a positive integer.")
+    return chunk_rows
+
+
+def ensure_local_source_allowed(path: str | Path, *, source_root: Path | None = None) -> None:
+    allowed_root = source_root or configured_source_root()
+    if allowed_root is None:
+        return
+
+    resolved_path = Path(path).expanduser().resolve()
+    try:
+        resolved_path.relative_to(allowed_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"Local task sources must stay within {allowed_root}. "
+            f"Received: {resolved_path}"
+        ) from exc
 
 
 def normalize_source_spec(
@@ -297,6 +332,7 @@ def expand_source_spec(source: SourceSpec, *, start_order: int) -> list[Resolved
         expanded: list[ResolvedSourceSpec] = []
 
         for offset, match in enumerate(matches):
+            ensure_local_source_allowed(match)
             spec = dict(source)
             spec.pop("glob", None)
             spec.pop("recursive", None)
@@ -311,11 +347,15 @@ def expand_source_spec(source: SourceSpec, *, start_order: int) -> list[Resolved
     explicit_source_name = isinstance(source, dict) and "source_name" in source
 
     if not normalized.source.startswith(("http://", "https://")) and source_path.is_dir():
+        ensure_local_source_allowed(source_path)
         matches = sorted(
             str(path)
             for path in source_path.iterdir()
             if path.is_file() and path.suffix.lower() in SUPPORTED_FILE_SUFFIXES
         )
+
+        for match in matches:
+            ensure_local_source_allowed(match)
 
         return [
             ResolvedSourceSpec(
@@ -328,6 +368,11 @@ def expand_source_spec(source: SourceSpec, *, start_order: int) -> list[Resolved
             )
             for offset, match in enumerate(matches)
         ]
+
+    if normalized.kind != "graph" and not normalized.source.startswith(
+        ("http://", "https://", "postgres://", "postgresql://")
+    ):
+        ensure_local_source_allowed(normalized.source)
 
     return [normalized]
 
@@ -351,6 +396,7 @@ def add_source_metadata(
     source_kind: str,
     source_sheet: str | None = None,
     source_path: str | None = None,
+    row_number_start: int = 1,
 ) -> pd.DataFrame:
     df = df.copy()
     df["source_name"] = source_spec.source_name
@@ -359,12 +405,39 @@ def add_source_metadata(
     df["source_path"] = source_path or source_spec.source
     df["source_priority"] = int(source_spec.source_priority)
     df["source_order"] = int(source_spec.source_order)
-    df["source_row_number"] = range(1, len(df) + 1)
+    df["source_row_number"] = range(row_number_start, row_number_start + len(df))
     return df
 
 
 def read_csv_source(source: str) -> pd.DataFrame:
     return pd.read_csv(source, dtype=object)
+
+
+def read_csv_source_frames(source_spec: ResolvedSourceSpec) -> list[pd.DataFrame]:
+    chunk_rows = configured_csv_chunk_rows()
+    if chunk_rows is None:
+        return [
+            add_source_metadata(
+                read_csv_source(source_spec.source),
+                source_spec=source_spec,
+                source_kind="csv",
+            )
+        ]
+
+    frames: list[pd.DataFrame] = []
+    row_number_start = 1
+    for chunk in pd.read_csv(source_spec.source, dtype=object, chunksize=chunk_rows):
+        frames.append(
+            add_source_metadata(
+                chunk,
+                source_spec=source_spec,
+                source_kind="csv",
+                row_number_start=row_number_start,
+            )
+        )
+        row_number_start += len(chunk)
+
+    return frames
 
 
 def read_json_source(source: str) -> pd.DataFrame:
@@ -451,6 +524,41 @@ def read_csv_bytes_source(content: bytes) -> pd.DataFrame:
     return pd.read_csv(BytesIO(content), dtype=object)
 
 
+def read_csv_bytes_source_frames(
+    source_spec: ResolvedSourceSpec,
+    *,
+    content: bytes,
+    source_kind: str,
+    source_path: str,
+) -> list[pd.DataFrame]:
+    chunk_rows = configured_csv_chunk_rows()
+    if chunk_rows is None:
+        return [
+            add_source_metadata(
+                read_csv_bytes_source(content),
+                source_spec=source_spec,
+                source_kind=source_kind,
+                source_path=source_path,
+            )
+        ]
+
+    frames: list[pd.DataFrame] = []
+    row_number_start = 1
+    for chunk in pd.read_csv(BytesIO(content), dtype=object, chunksize=chunk_rows):
+        frames.append(
+            add_source_metadata(
+                chunk,
+                source_spec=source_spec,
+                source_kind=source_kind,
+                source_path=source_path,
+                row_number_start=row_number_start,
+            )
+        )
+        row_number_start += len(chunk)
+
+    return frames
+
+
 def read_json_bytes_source(content: bytes) -> pd.DataFrame:
     payload = json.loads(content.decode("utf-8"))
     return pd.DataFrame(extract_json_records(payload))
@@ -485,14 +593,12 @@ def read_graph_source(source_spec: ResolvedSourceSpec) -> list[pd.DataFrame]:
     source_path = download.web_url or source_spec.source
 
     if content_kind == "csv":
-        return [
-            add_source_metadata(
-                read_csv_bytes_source(download.content),
-                source_spec=source_spec,
-                source_kind="graph_csv",
-                source_path=source_path,
-            )
-        ]
+        return read_csv_bytes_source_frames(
+            source_spec,
+            content=download.content,
+            source_kind="graph_csv",
+            source_path=source_path,
+        )
 
     if content_kind == "json":
         return [
@@ -531,13 +637,7 @@ def read_source_spec_to_frames(source: ResolvedSourceSpec | SourceSpec) -> list[
         )
 
     if kind == "csv":
-        return [
-            add_source_metadata(
-                read_csv_source(source_spec.source),
-                source_spec=source_spec,
-                source_kind="csv",
-            )
-        ]
+        return read_csv_source_frames(source_spec)
 
     if kind == "json":
         return [
