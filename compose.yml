@@ -31,6 +31,8 @@ services:
       - ./data:/app/data:ro
     environment:
       DATABASE_URL: *database-url
+      DB_BOOTSTRAP_SCHEMA: ${DB_BOOTSTRAP_SCHEMA:-true}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-4}
       GRAPH_AUTH_MODE: ${GRAPH_AUTH_MODE:-client_secret}
       GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
       GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
@@ -61,6 +63,8 @@ services:
       TASKS_SOURCE: *database-url
       APP_REFRESH_MS: ${APP_REFRESH_MS:-60000}
       DATABASE_URL: *database-url
+      DB_BOOTSTRAP_SCHEMA: ${DB_BOOTSTRAP_SCHEMA:-true}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-4}
       GRAPH_AUTH_MODE: ${GRAPH_AUTH_MODE:-client_secret}
       GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
       GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}

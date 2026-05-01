@@ -10,6 +10,7 @@ from typing import Any
 
 from src.application.settings import AutoSyncSettings, load_auto_sync_settings
 from src.infrastructure.sources import (
+    describe_remote_source_state,
     detect_source_kind,
     expand_source_specs,
     parse_source_config,
@@ -164,8 +165,25 @@ def build_source_snapshot(source_input: Any) -> SourceSnapshot:
                 state["size"] = None
                 state["mtime_ns"] = None
         else:
-            volatile_source_count += 1
-            state["volatile"] = True
+            try:
+                remote_state = describe_remote_source_state(source)
+            except Exception as exc:
+                remote_state = None
+                state["remote_metadata_error"] = type(exc).__name__
+            state.update(remote_state or {})
+            has_remote_fingerprint = any(
+                bool(state.get(key))
+                for key in (
+                    "remote_etag",
+                    "remote_ctag",
+                    "remote_last_modified",
+                    "remote_content_length",
+                    "remote_size",
+                )
+            )
+            if not has_remote_fingerprint:
+                volatile_source_count += 1
+                state["volatile"] = True
 
         source_states.append(state)
 

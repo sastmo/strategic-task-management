@@ -45,15 +45,20 @@ class SyncSummary:
 
 
 def sync_to_database(source_input: Any, database_url: str) -> SyncSummary:
-    import psycopg
-
+    from src.infrastructure.db import (
+        database_schema_bootstrap_enabled,
+        pooled_connection,
+    )
     from src.infrastructure.task_store import TaskWarehouseStore
 
     batch = load_task_batch(source_input)
     source_names = sorted({source.source_name for source in batch.resolved_sources})
     source_config_payload = batch.source_config_payload()
 
-    with psycopg.connect(database_url) as connection:
+    with pooled_connection(database_url) as connection:
+        lock_acquired = False
+        run_id: int | None = None
+        merge_stats: dict[str, int] | None = None
         with connection.cursor() as _cursor:
             _cursor.execute("SELECT pg_try_advisory_lock(%s)", (_SYNC_LOCK_KEY,))
             acquired = _cursor.fetchone()
@@ -62,32 +67,35 @@ def sync_to_database(source_input: Any, database_url: str) -> SyncSummary:
             raise SyncLockConflict(
                 "Another sync process holds the advisory lock; skipping this cycle."
             )
+        lock_acquired = True
 
         store = TaskWarehouseStore(connection)
-        store.ensure_database_objects()
-
-        run_id = store.create_ingestion_run(
-            source_config=source_config_payload,
-            union_mode=batch.source_config.union_mode,
-            source_count=batch.source_count,
-            frame_count=batch.frame_count,
-            staged_row_count=len(batch.staged_frame),
-            current_row_count=len(batch.current_frame),
+        store.ensure_database_objects(
+            allow_bootstrap=database_schema_bootstrap_enabled(),
         )
-        store.log_event(
-            event_type="task_sync.started",
-            payload={
-                "run_id": run_id,
-                "source_count": batch.source_count,
-                "frame_count": batch.frame_count,
-                "staged_row_count": len(batch.staged_frame),
-                "current_row_count": len(batch.current_frame),
-                "union_mode": batch.source_config.union_mode,
-            },
-        )
-        connection.commit()
 
         try:
+            run_id = store.create_ingestion_run(
+                source_config=source_config_payload,
+                union_mode=batch.source_config.union_mode,
+                source_count=batch.source_count,
+                frame_count=batch.frame_count,
+                staged_row_count=len(batch.staged_frame),
+                current_row_count=len(batch.current_frame),
+            )
+            store.log_event(
+                event_type="task_sync.started",
+                payload={
+                    "run_id": run_id,
+                    "source_count": batch.source_count,
+                    "frame_count": batch.frame_count,
+                    "staged_row_count": len(batch.staged_frame),
+                    "current_row_count": len(batch.current_frame),
+                    "union_mode": batch.source_config.union_mode,
+                },
+            )
+            connection.commit()
+
             store.stage_task_data(
                 run_id=run_id,
                 staged_frame=batch.staged_frame,
@@ -119,22 +127,30 @@ def sync_to_database(source_input: Any, database_url: str) -> SyncSummary:
             connection.commit()
         except Exception as exc:
             connection.rollback()
-            store.finalize_ingestion_run(
-                run_id=run_id,
-                status="failed",
-                error_message=str(exc),
-            )
-            store.log_event(
-                event_type="task_sync.failed",
-                payload={
-                    "run_id": run_id,
-                    "error": str(exc),
-                    "union_mode": batch.source_config.union_mode,
-                },
-            )
-            connection.commit()
+            if run_id is not None:
+                store.finalize_ingestion_run(
+                    run_id=run_id,
+                    status="failed",
+                    error_message=str(exc),
+                )
+                store.log_event(
+                    event_type="task_sync.failed",
+                    payload={
+                        "run_id": run_id,
+                        "error": str(exc),
+                        "union_mode": batch.source_config.union_mode,
+                    },
+                )
+                connection.commit()
             raise
+        finally:
+            if lock_acquired:
+                with connection.cursor() as _cursor:
+                    _cursor.execute("SELECT pg_advisory_unlock(%s)", (_SYNC_LOCK_KEY,))
+                connection.rollback()
 
+    assert run_id is not None
+    assert merge_stats is not None
     summary = SyncSummary(
         run_id=run_id,
         source_count=batch.source_count,

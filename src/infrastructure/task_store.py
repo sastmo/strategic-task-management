@@ -9,14 +9,46 @@ import psycopg
 from psycopg.rows import dict_row
 
 from src.domain.tasks import Task
-from src.infrastructure.user_repository import AUTH_SCHEMA_STATEMENTS
+from src.infrastructure.db import (
+    DatabaseSchemaError,
+    database_schema_bootstrap_enabled,
+    ensure_schema_state_table,
+    pooled_connection,
+    read_schema_version,
+    write_schema_version,
+)
+from src.infrastructure.user_repository import (
+    AUTH_SCHEMA_COMPONENT,
+    AUTH_SCHEMA_STATEMENTS,
+    AUTH_SCHEMA_VERSION,
+)
+
+TASK_WAREHOUSE_SCHEMA_COMPONENT = "task_warehouse"
+TASK_WAREHOUSE_SCHEMA_VERSION = 1
 
 
 class TaskWarehouseStore:
     def __init__(self, connection: psycopg.Connection) -> None:
         self.connection = connection
 
-    def ensure_database_objects(self) -> None:
+    def _required_tables_present(self) -> bool:
+        required_tables = (
+            "ops.ingestion_runs",
+            "staging.task_records",
+            "staging.task_snapshots",
+            "warehouse.tasks_current",
+            "warehouse.task_history",
+            "app.event_log",
+        )
+        with self.connection.cursor() as cursor:
+            for table_name in required_tables:
+                cursor.execute("SELECT to_regclass(%s)", (table_name,))
+                row = cursor.fetchone()
+                if not row or not row[0]:
+                    return False
+        return True
+
+    def bootstrap_database_objects(self) -> None:
         statements = [
             "CREATE SCHEMA IF NOT EXISTS ops",
             "CREATE SCHEMA IF NOT EXISTS staging",
@@ -239,9 +271,58 @@ class TaskWarehouseStore:
         ]
         statements[3:3] = list(AUTH_SCHEMA_STATEMENTS)
 
+        ensure_schema_state_table(self.connection)
         with self.connection.cursor() as cursor:
             for statement in statements:
                 cursor.execute(statement)
+        write_schema_version(
+            self.connection,
+            component_name=AUTH_SCHEMA_COMPONENT,
+            schema_version=AUTH_SCHEMA_VERSION,
+        )
+        write_schema_version(
+            self.connection,
+            component_name=TASK_WAREHOUSE_SCHEMA_COMPONENT,
+            schema_version=TASK_WAREHOUSE_SCHEMA_VERSION,
+        )
+
+    def ensure_database_objects(self, *, allow_bootstrap: bool = False) -> None:
+        task_version = read_schema_version(self.connection, TASK_WAREHOUSE_SCHEMA_COMPONENT)
+        auth_version = read_schema_version(self.connection, AUTH_SCHEMA_COMPONENT)
+
+        if (
+            task_version == TASK_WAREHOUSE_SCHEMA_VERSION
+            and auth_version == AUTH_SCHEMA_VERSION
+        ):
+            if not self._required_tables_present():
+                raise DatabaseSchemaError(
+                    "The task warehouse schema version is marked as current, "
+                    "but required tables are missing. Reinitialize or migrate the database."
+                )
+            return
+
+        if allow_bootstrap and task_version is None and auth_version in {None, AUTH_SCHEMA_VERSION}:
+            self.bootstrap_database_objects()
+            return
+
+        if task_version is None:
+            raise DatabaseSchemaError(
+                "The task warehouse schema is not initialized. "
+                "Set DB_BOOTSTRAP_SCHEMA=1 for an explicit local bootstrap, "
+                "or initialize the database before running sync."
+            )
+
+        if task_version != TASK_WAREHOUSE_SCHEMA_VERSION:
+            raise DatabaseSchemaError(
+                "The task warehouse schema version is incompatible. "
+                f"Expected {TASK_WAREHOUSE_SCHEMA_VERSION}, found {task_version}. "
+                "Apply the required database migration before running this service."
+            )
+
+        raise DatabaseSchemaError(
+            "The authorization schema required by the task warehouse is not initialized. "
+            "Initialize or migrate the database before running this service."
+        )
 
     def log_event(
         self,
@@ -845,8 +926,11 @@ class TaskWarehouseStore:
 
 
 def load_tasks_from_database(database_url: str) -> list[Task]:
-    with psycopg.connect(database_url) as connection:
+    with pooled_connection(database_url) as connection:
         store = TaskWarehouseStore(connection)
+        store.ensure_database_objects(
+            allow_bootstrap=database_schema_bootstrap_enabled(),
+        )
         return store.load_current_tasks()
 
 

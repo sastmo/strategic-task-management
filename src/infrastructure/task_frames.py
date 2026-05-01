@@ -284,17 +284,67 @@ def resolve_current_frame(df: pd.DataFrame, union_mode: object = "union") -> pd.
         current.insert(0, "record_id", current["business_key"])
         return current[CURRENT_COLUMNS]
 
-    seen: dict[str, int] = {}
+    duplicate_counts = current["business_key"].value_counts().to_dict()
+    duplicate_suffix_counts: dict[str, int] = {}
     record_ids: list[str] = []
 
-    for business_key in current["business_key"].tolist():
-        count = seen.get(business_key, 0) + 1
-        seen[business_key] = count
-        record_ids.append(business_key if count == 1 else f"{business_key}::dup{count}")
+    for row in current.itertuples(index=False):
+        business_key = str(row.business_key)
+        if duplicate_counts.get(business_key, 0) <= 1:
+            record_ids.append(business_key)
+            continue
+
+        duplicate_token = _stable_duplicate_token(
+            source_kind=str(row.source_kind),
+            source_sheet=str(row.source_sheet),
+            source_path=str(row.source_path),
+            record_hash=str(row.record_hash),
+        )
+        suffix_key = f"{business_key}::dup-{duplicate_token}"
+        suffix_count = duplicate_suffix_counts.get(suffix_key, 0) + 1
+        duplicate_suffix_counts[suffix_key] = suffix_count
+
+        if suffix_count == 1:
+            record_ids.append(suffix_key)
+            continue
+
+        tie_breaker = _stable_duplicate_token(
+            source_kind=str(row.source_kind),
+            source_sheet=str(row.source_sheet),
+            source_path=str(row.source_path),
+            record_hash=str(row.record_hash),
+            source_row_number=int(row.source_row_number),
+            source_order=int(row.source_order),
+        )
+        record_ids.append(f"{suffix_key}-{tie_breaker[:6]}")
 
     current = current.copy()
     current.insert(0, "record_id", record_ids)
     return current[CURRENT_COLUMNS]
+
+
+def _stable_duplicate_token(
+    *,
+    source_kind: str,
+    source_sheet: str,
+    source_path: str,
+    record_hash: str,
+    source_row_number: int | None = None,
+    source_order: int | None = None,
+) -> str:
+    payload: dict[str, object] = {
+        "source_kind": source_kind,
+        "source_sheet": source_sheet,
+        "source_path": source_path,
+        "record_hash": record_hash,
+    }
+    if source_row_number is not None:
+        payload["source_row_number"] = source_row_number
+    if source_order is not None:
+        payload["source_order"] = source_order
+
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha1(encoded).hexdigest()[:12]
 
 
 def frame_to_tasks(df: pd.DataFrame) -> list[Task]:

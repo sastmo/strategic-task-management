@@ -186,6 +186,37 @@ class AuthServiceTests(unittest.TestCase):
 
         self.assertTrue(auth_context.is_authorized)
 
+    def test_app_service_mode_denies_unexpected_identity_provider(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "AUTH_MODE": "app_service",
+                "APP_TRUSTED_PROXY_SECRET": "correct-secret",
+                "APP_TRUSTED_PROXY_HEADER": "X-Proxy-Auth",
+                "AUTH_APP_SERVICE_PROVIDER": "aad",
+            },
+            clear=False,
+        ):
+            settings = load_auth_settings()
+
+        header = build_principal_header(
+            {
+                "auth_typ": "google",
+                "claims": [{"typ": "preferred_username", "val": "user@example.com"}],
+            }
+        )
+        auth_context = resolve_request_authorization(
+            headers={
+                "X-MS-CLIENT-PRINCIPAL": header,
+                "X-MS-CLIENT-PRINCIPAL-IDP": "google",
+                "X-Proxy-Auth": "correct-secret",
+            },
+            settings=settings,
+        )
+
+        self.assertFalse(auth_context.is_authorized)
+        self.assertEqual(auth_context.state, "access_denied")
+
     def test_load_auth_settings_raises_for_local_mode_in_production(self) -> None:
         with patch.dict(
             "os.environ",

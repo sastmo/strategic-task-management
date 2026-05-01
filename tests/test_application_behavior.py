@@ -61,15 +61,16 @@ class ApplicationBehaviorTests(unittest.TestCase):
                     ]
                 ).to_excel(writer, sheet_name="SheetB", index=False)
 
-            batch = load_task_batch(
-                {
-                    "sources": [
-                        {"source": str(csv_path), "source_name": "ops_feed", "source_priority": 200},
-                        {"source": str(excel_path), "source_name": "planning_book", "all_sheets": True},
-                    ],
-                    "union_mode": "union",
-                }
-            )
+            with mock.patch.dict("os.environ", {"TASK_SOURCE_ROOT": str(workspace)}, clear=False):
+                batch = load_task_batch(
+                    {
+                        "sources": [
+                            {"source": str(csv_path), "source_name": "ops_feed", "source_priority": 200},
+                            {"source": str(excel_path), "source_name": "planning_book", "all_sheets": True},
+                        ],
+                        "union_mode": "union",
+                    }
+                )
 
         self.assertEqual(batch.source_count, 2)
         self.assertEqual(batch.frame_count, 3)
@@ -110,7 +111,11 @@ class ApplicationBehaviorTests(unittest.TestCase):
                 ]
             ).to_csv(csv_path, index=False)
 
-            with mock.patch.dict("os.environ", {"TASK_CSV_CHUNK_ROWS": "2"}, clear=False):
+            with mock.patch.dict(
+                "os.environ",
+                {"TASK_CSV_CHUNK_ROWS": "2", "TASK_SOURCE_ROOT": str(workspace)},
+                clear=False,
+            ):
                 batch = load_task_batch(str(csv_path))
 
         self.assertEqual(batch.source_count, 1)
@@ -126,27 +131,28 @@ class ApplicationBehaviorTests(unittest.TestCase):
                 "name,currentImpact,futureImpact,progress\nTask A,10,20,30\n",
                 encoding="utf-8",
             )
-            first_snapshot = build_source_snapshot(str(workspace))
+            with mock.patch.dict("os.environ", {"TASK_SOURCE_ROOT": str(workspace)}, clear=False):
+                first_snapshot = build_source_snapshot(str(workspace))
 
-            self.assertEqual(
-                determine_sync_reason(
-                    snapshot=first_snapshot,
-                    last_synced_fingerprint=None,
-                    last_success_at=None,
-                    last_attempt_at=None,
-                    last_attempt_failed=False,
-                    now=time.monotonic(),
-                    refresh_seconds=1800,
-                    retry_seconds=120,
-                ),
-                "startup",
-            )
+                self.assertEqual(
+                    determine_sync_reason(
+                        snapshot=first_snapshot,
+                        last_synced_fingerprint=None,
+                        last_success_at=None,
+                        last_attempt_at=None,
+                        last_attempt_failed=False,
+                        now=time.monotonic(),
+                        refresh_seconds=1800,
+                        retry_seconds=120,
+                    ),
+                    "startup",
+                )
 
-            source_file.write_text(
-                "name,currentImpact,futureImpact,progress\nTask B,10,20,30\n",
-                encoding="utf-8",
-            )
-            second_snapshot = build_source_snapshot(str(workspace))
+                source_file.write_text(
+                    "name,currentImpact,futureImpact,progress\nTask B,10,20,30\n",
+                    encoding="utf-8",
+                )
+                second_snapshot = build_source_snapshot(str(workspace))
 
         self.assertEqual(
             determine_sync_reason(
@@ -173,6 +179,27 @@ class ApplicationBehaviorTests(unittest.TestCase):
                 retry_seconds=120,
             ),
             "scheduled_refresh",
+        )
+
+    def test_build_source_snapshot_uses_remote_metadata_when_available(self) -> None:
+        source_input = {
+            "sources": [{"source": "https://example.com/tasks.json"}],
+            "union_mode": "union",
+        }
+
+        with mock.patch(
+            "src.application.auto_sync.describe_remote_source_state",
+            return_value={
+                "remote_etag": '"abc123"',
+                "remote_last_modified": "Fri, 01 May 2026 10:00:00 GMT",
+            },
+        ):
+            snapshot = build_source_snapshot(source_input)
+
+        self.assertEqual(snapshot.volatile_source_count, 0)
+        self.assertEqual(
+            snapshot.details["expanded_sources"][0]["remote_etag"],
+            '"abc123"',
         )
 
     def test_dashboard_template_renders_without_placeholders(self) -> None:

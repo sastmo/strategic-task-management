@@ -18,6 +18,7 @@ from src.domain.identity import (
 from src.infrastructure.auth.app_service import (
     build_app_service_login_url,
     build_app_service_logout_url,
+    identity_provider_allowed,
     parse_app_service_user,
 )
 
@@ -173,6 +174,23 @@ def resolve_request_authorization(
                 sign_in_url=sign_in_url,
                 sign_out_url=sign_out_url,
                 diagnostics=(str(exc),),
+            )
+
+        if user is not None and not identity_provider_allowed(
+            user.identity_provider,
+            settings.app_service_provider,
+        ):
+            return AuthorizationContext(
+                state="access_denied",
+                user=user,
+                permissions=PermissionSet(),
+                message=(
+                    "The signed-in identity provider is not allowed for this application."
+                ),
+                auth_mode=settings.mode,
+                sign_in_url=sign_in_url,
+                sign_out_url=sign_out_url,
+                diagnostics=(user.identity_provider,),
             )
 
     if user is None:

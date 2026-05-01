@@ -297,6 +297,38 @@ class GraphFileClient:
         item_path = normalize_item_path(file_path)
         return self.request_bytes(f"/drives/{drive_id}/root:{quote(item_path, safe='/')}:/content")
 
+    def describe_file(
+        self,
+        *,
+        site_url: str,
+        drive_id: str = "",
+        drive_name: str = "",
+        file_path: str = "",
+        item_id: str = "",
+    ) -> dict[str, Any]:
+        site_id = self.resolve_site_id(site_url)
+        resolved_drive_id = self.resolve_drive_id(
+            site_id=site_id,
+            drive_id=drive_id,
+            drive_name=drive_name,
+        )
+        item = self.get_drive_item(
+            drive_id=resolved_drive_id,
+            file_path=file_path,
+            item_id=item_id,
+        )
+        return {
+            "site_id": site_id,
+            "drive_id": resolved_drive_id,
+            "item_id": text_or_blank(item.get("id")),
+            "name": text_or_blank(item.get("name")),
+            "web_url": text_or_blank(item.get("webUrl")),
+            "etag": text_or_blank(item.get("eTag")),
+            "ctag": text_or_blank(item.get("cTag")),
+            "last_modified": text_or_blank(item.get("lastModifiedDateTime")),
+            "size": item.get("size"),
+        }
+
     def download_file(
         self,
         *,

@@ -187,6 +187,7 @@ def parse_source_config(source_input: Any) -> TaskSourceConfig:
 
     path = Path(raw_value)
     if path.suffix.lower() == ".json" and path.exists():
+        ensure_local_source_allowed(path)
         payload = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(payload, dict) and "sources" in payload:
             return parse_source_config(payload)
@@ -236,7 +237,10 @@ def configured_csv_chunk_rows() -> int | None:
 def ensure_local_source_allowed(path: str | Path, *, source_root: Path | None = None) -> None:
     allowed_root = source_root or configured_source_root()
     if allowed_root is None:
-        return
+        raise ValueError(
+            f"{TASK_SOURCE_ROOT_ENV} must be set before reading local task sources. "
+            f"Received local path: {Path(path).expanduser().resolve()}"
+        )
 
     resolved_path = Path(path).expanduser().resolve()
     try:
@@ -449,6 +453,53 @@ def read_api_source(source: str) -> pd.DataFrame:
     response = requests.get(source, timeout=15)
     response.raise_for_status()
     return pd.DataFrame(extract_json_records(response.json()))
+
+
+def describe_remote_source_state(source_spec: ResolvedSourceSpec) -> dict[str, Any] | None:
+    source_kind = source_spec.kind or detect_source_kind(source_spec.source)
+
+    if source_kind == "graph":
+        client = GraphFileClient.from_env()
+        metadata = client.describe_file(
+            site_url=source_spec.site_url or "",
+            drive_id=source_spec.drive_id or "",
+            drive_name=source_spec.drive_name or "",
+            file_path=source_spec.file_path or "",
+            item_id=source_spec.item_id or "",
+        )
+        return {
+            "remote_site_id": metadata.get("site_id", ""),
+            "remote_drive_id": metadata.get("drive_id", ""),
+            "remote_item_id": metadata.get("item_id", ""),
+            "remote_name": metadata.get("name", ""),
+            "remote_web_url": metadata.get("web_url", ""),
+            "remote_etag": metadata.get("etag", ""),
+            "remote_ctag": metadata.get("ctag", ""),
+            "remote_last_modified": metadata.get("last_modified", ""),
+            "remote_size": metadata.get("size"),
+        }
+
+    if source_kind != "api":
+        return None
+
+    response = requests.head(source_spec.source, timeout=15, allow_redirects=True)
+    if response.status_code in {405, 501}:
+        response.close()
+        response = requests.get(
+            source_spec.source,
+            timeout=15,
+            allow_redirects=True,
+            stream=True,
+        )
+    try:
+        response.raise_for_status()
+        return {
+            "remote_etag": response.headers.get("ETag", "").strip(),
+            "remote_last_modified": response.headers.get("Last-Modified", "").strip(),
+            "remote_content_length": response.headers.get("Content-Length", "").strip(),
+        }
+    finally:
+        response.close()
 
 
 def _read_excel_frames(
