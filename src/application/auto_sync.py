@@ -248,3 +248,7 @@ def run_auto_sync(
 
     monitor = AutoSyncMonitor(settings)
     monitor.run_forever()
+
+
+if __name__ == "__main__":
+    run_auto_sync()

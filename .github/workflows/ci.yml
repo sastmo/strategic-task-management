@@ -74,3 +74,5 @@ jobs:
 
       - name: Validate Docker Compose configuration
         run: docker compose config
+        env:
+          POSTGRES_PASSWORD: ci-placeholder
