@@ -53,6 +53,9 @@ ROLE_CLAIM_KEYS = (
     "role",
     "http://schemas.microsoft.com/ws/2008/06/identity/claims/role",
 )
+_PROVIDER_ALIASES = {
+    "aad": {"aad", "azureactivedirectory"},
+}
 
 
 def normalize_headers(headers: Mapping[str, Any]) -> dict[str, str]:
@@ -158,10 +161,15 @@ def parse_app_service_user(headers: Mapping[str, Any]) -> AuthenticatedUser | No
         or email
         or principal_id
     )
-    identity_provider = (
-        text_or_blank(normalized_headers.get(CLIENT_PRINCIPAL_IDP_HEADER, ""))
-        or text_or_blank(principal_payload.get("auth_typ"))
-    )
+    identity_provider_header = text_or_blank(normalized_headers.get(CLIENT_PRINCIPAL_IDP_HEADER, ""))
+    identity_provider_payload = text_or_blank(principal_payload.get("auth_typ"))
+    if (
+        identity_provider_header
+        and identity_provider_payload
+        and identity_provider_header.lower() != identity_provider_payload.lower()
+    ):
+        raise ValueError("App Service identity provider headers disagree with the principal payload.")
+    identity_provider = identity_provider_header or identity_provider_payload
     groups = all_claim_values(indexed_claims, GROUP_CLAIM_KEYS)
     app_roles = normalize_role_collection(all_claim_values(indexed_claims, ROLE_CLAIM_KEYS))
 
@@ -184,6 +192,19 @@ def parse_app_service_user(headers: Mapping[str, Any]) -> AuthenticatedUser | No
         app_roles=app_roles,
         is_authenticated=True,
     )
+
+
+def identity_provider_allowed(identity_provider: str, configured_provider: str) -> bool:
+    normalized_identity_provider = text_or_blank(identity_provider).lower()
+    normalized_configured_provider = text_or_blank(configured_provider).lower()
+    if not normalized_identity_provider or not normalized_configured_provider:
+        return False
+
+    allowed_values = _PROVIDER_ALIASES.get(
+        normalized_configured_provider,
+        {normalized_configured_provider},
+    )
+    return normalized_identity_provider in allowed_values
 
 
 def build_app_service_login_url(provider: str = "aad", redirect_path: str = "/") -> str:

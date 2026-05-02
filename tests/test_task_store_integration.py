@@ -44,7 +44,7 @@ class TaskStoreIntegrationTests(unittest.TestCase):
         self.connection = psycopg.connect(TEST_DATABASE_URL)
         self.store = task_store_module.TaskWarehouseStore(self.connection)
         self._drop_test_schemas()
-        self.store.ensure_database_objects()
+        self.store.ensure_database_objects(allow_bootstrap=True)
 
     def tearDown(self) -> None:
         try:

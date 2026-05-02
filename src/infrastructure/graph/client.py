@@ -160,15 +160,38 @@ def build_token_credential(settings: GraphAuthSettings):
     )
 
 
+# Module-level cache so the sync worker reuses a single session and credential
+# object across poll cycles.  Keyed on (auth_mode, tenant_id, client_id,
+# base_url) — enough to detect a configuration change without storing secrets.
+_client_cache: dict[tuple[str, str, str, str], GraphFileClient] = {}
+
+
+def _get_cached_client(settings: GraphAuthSettings) -> GraphFileClient:
+    key = (settings.auth_mode, settings.tenant_id, settings.client_id, settings.base_url)
+    if key not in _client_cache:
+        _client_cache[key] = GraphFileClient(settings)
+    return _client_cache[key]
+
+
 class GraphFileClient:
     def __init__(self, settings: GraphAuthSettings) -> None:
         self.settings = settings
         self.session = requests.Session()
         self.credential = build_token_credential(settings)
 
+    def close(self) -> None:
+        self.session.close()
+
     @classmethod
     def from_env(cls) -> GraphFileClient:
-        return cls(load_graph_auth_settings())
+        """Return a cached client for the current environment settings.
+
+        Creating a new client per call wastes a ``requests.Session`` and
+        forces a credential object instantiation on every sync cycle.  The
+        cache is keyed on the settings tuple so configuration changes (e.g.
+        during testing) still produce a fresh client.
+        """
+        return _get_cached_client(load_graph_auth_settings())
 
     def auth_headers(self, *, accept: str = "application/json") -> dict[str, str]:
         token = self.credential.get_token(GRAPH_SCOPE).token
@@ -296,6 +319,38 @@ class GraphFileClient:
 
         item_path = normalize_item_path(file_path)
         return self.request_bytes(f"/drives/{drive_id}/root:{quote(item_path, safe='/')}:/content")
+
+    def describe_file(
+        self,
+        *,
+        site_url: str,
+        drive_id: str = "",
+        drive_name: str = "",
+        file_path: str = "",
+        item_id: str = "",
+    ) -> dict[str, Any]:
+        site_id = self.resolve_site_id(site_url)
+        resolved_drive_id = self.resolve_drive_id(
+            site_id=site_id,
+            drive_id=drive_id,
+            drive_name=drive_name,
+        )
+        item = self.get_drive_item(
+            drive_id=resolved_drive_id,
+            file_path=file_path,
+            item_id=item_id,
+        )
+        return {
+            "site_id": site_id,
+            "drive_id": resolved_drive_id,
+            "item_id": text_or_blank(item.get("id")),
+            "name": text_or_blank(item.get("name")),
+            "web_url": text_or_blank(item.get("webUrl")),
+            "etag": text_or_blank(item.get("eTag")),
+            "ctag": text_or_blank(item.get("cTag")),
+            "last_modified": text_or_blank(item.get("lastModifiedDateTime")),
+            "size": item.get("size"),
+        }
 
     def download_file(
         self,
