@@ -285,6 +285,9 @@ class TaskWarehouseStore:
             component_name=TASK_WAREHOUSE_SCHEMA_COMPONENT,
             schema_version=TASK_WAREHOUSE_SCHEMA_VERSION,
         )
+        # Commit the DDL and version records atomically so that a partial
+        # failure does not leave the schema in an inconsistent state.
+        self.connection.commit()
 
     def ensure_database_objects(self, *, allow_bootstrap: bool = False) -> None:
         task_version = read_schema_version(self.connection, TASK_WAREHOUSE_SCHEMA_COMPONENT)
@@ -446,7 +449,7 @@ class TaskWarehouseStore:
                     int(row["source_order"]),
                     int(row["source_row_number"]),
                 )
-                for _, row in staged_frame.iterrows()
+                for row in staged_frame.to_dict("records")
             ]
 
             with self.connection.cursor() as cursor:
@@ -500,7 +503,7 @@ class TaskWarehouseStore:
                     int(row["source_order"]),
                     int(row["source_row_number"]),
                 )
-                for _, row in current_frame.iterrows()
+                for row in current_frame.to_dict("records")
             ]
 
             with self.connection.cursor() as cursor:

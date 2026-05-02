@@ -6,6 +6,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from src.application.settings import AutoSyncSettings, load_auto_sync_settings
@@ -17,6 +18,16 @@ from src.infrastructure.sources import (
 )
 
 _logger = logging.getLogger(__name__)
+
+_HEALTH_SIGNAL_PATH = Path("/tmp/sync.ok")
+
+
+def _write_health_signal() -> None:
+    """Touch a file after each successful sync so the Docker HEALTHCHECK can verify liveness."""
+    try:
+        _HEALTH_SIGNAL_PATH.write_text(str(time.monotonic()), encoding="utf-8")
+    except OSError:
+        _logger.debug("Could not write health signal to %s", _HEALTH_SIGNAL_PATH)
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +112,7 @@ class AutoSyncMonitor:
                 self.last_synced_fingerprint = snapshot.fingerprint
                 self.last_success_at = self.monotonic()
                 self.last_attempt_failed = False
+                _write_health_signal()
             except Exception as exc:
                 from src.application.task_sync import SyncLockConflict
 

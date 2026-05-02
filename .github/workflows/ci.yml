@@ -53,16 +53,8 @@ jobs:
       - name: Verify Python sources compile
         run: python -m compileall src app.py
 
-      - name: Run tests
-        run: pytest tests/ -v --tb=short
-        env:
-          TEST_DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_stm
-
-      - name: Report coverage
-        run: |
-          coverage run -m pytest tests/
-          coverage report
-          coverage xml
+      - name: Run tests with coverage
+        run: pytest tests/ -v --tb=short --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=70
         env:
           TEST_DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_stm
 

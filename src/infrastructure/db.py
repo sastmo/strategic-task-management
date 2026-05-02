@@ -11,7 +11,9 @@ import psycopg
 
 DB_BOOTSTRAP_SCHEMA_ENV = "DB_BOOTSTRAP_SCHEMA"
 DB_POOL_MAX_SIZE_ENV = "DB_POOL_MAX_SIZE"
+DB_POOL_BORROW_TIMEOUT_ENV = "DB_POOL_BORROW_TIMEOUT"
 _DEFAULT_DB_POOL_MAX_SIZE = 4
+_DEFAULT_DB_POOL_BORROW_TIMEOUT = 30  # seconds
 _SCHEMA_STATE_TABLE = "ops.schema_state"
 
 
@@ -31,17 +33,41 @@ def database_pool_max_size() -> int:
     raw_value = os.getenv(DB_POOL_MAX_SIZE_ENV, str(_DEFAULT_DB_POOL_MAX_SIZE)).strip()
     if not raw_value:
         return _DEFAULT_DB_POOL_MAX_SIZE
-
-    value = int(raw_value)
+    try:
+        value = int(raw_value)
+    except ValueError:
+        raise ValueError(
+            f"{DB_POOL_MAX_SIZE_ENV} must be a positive integer, got {raw_value!r}."
+        ) from None
     if value <= 0:
-        raise ValueError(f"{DB_POOL_MAX_SIZE_ENV} must be a positive integer.")
+        raise ValueError(
+            f"{DB_POOL_MAX_SIZE_ENV} must be a positive integer, got {value}."
+        )
+    return value
+
+
+def database_pool_borrow_timeout() -> int:
+    raw_value = os.getenv(DB_POOL_BORROW_TIMEOUT_ENV, str(_DEFAULT_DB_POOL_BORROW_TIMEOUT)).strip()
+    if not raw_value:
+        return _DEFAULT_DB_POOL_BORROW_TIMEOUT
+    try:
+        value = int(raw_value)
+    except ValueError:
+        raise ValueError(
+            f"{DB_POOL_BORROW_TIMEOUT_ENV} must be a positive integer (seconds), got {raw_value!r}."
+        ) from None
+    if value <= 0:
+        raise ValueError(
+            f"{DB_POOL_BORROW_TIMEOUT_ENV} must be a positive integer (seconds), got {value}."
+        )
     return value
 
 
 class DatabaseConnectionPool:
-    def __init__(self, database_url: str, *, max_size: int) -> None:
+    def __init__(self, database_url: str, *, max_size: int, borrow_timeout: int = _DEFAULT_DB_POOL_BORROW_TIMEOUT) -> None:
         self.database_url = database_url
         self.max_size = max(1, max_size)
+        self.borrow_timeout = max(1, borrow_timeout)
         self._available: LifoQueue[psycopg.Connection] = LifoQueue()
         self._created = 0
         self._lock = threading.Lock()
@@ -51,7 +77,15 @@ class DatabaseConnectionPool:
 
     @staticmethod
     def _is_usable(connection: psycopg.Connection) -> bool:
-        return not connection.closed and not bool(getattr(connection, "broken", False))
+        if connection.closed:
+            return False
+        # psycopg3 exposes the underlying libpq status; BAD means the server
+        # has closed the TCP connection while this end still thinks it is open.
+        try:
+            from psycopg.pq import ConnStatus
+            return connection.pgconn.status == ConnStatus.OK
+        except Exception:
+            return True
 
     def _discard_connection(self, connection: psycopg.Connection) -> None:
         try:
@@ -61,6 +95,8 @@ class DatabaseConnectionPool:
                 self._created = max(0, self._created - 1)
 
     def _borrow_connection(self) -> psycopg.Connection:
+        # Drain any stale connections sitting in the queue before deciding
+        # whether there is capacity left to create a new one.
         while True:
             try:
                 connection = self._available.get_nowait()
@@ -86,11 +122,24 @@ class DatabaseConnectionPool:
                     self._created = max(0, self._created - 1)
                 raise
 
+        # Pool is at capacity; wait with a deadline so we never block forever.
+        deadline = self.borrow_timeout
         while True:
-            connection = self._available.get()
+            try:
+                connection = self._available.get(timeout=deadline)
+            except Empty:
+                raise TimeoutError(
+                    f"Database connection pool exhausted (max_size={self.max_size}). "
+                    f"No connection became available after {self.borrow_timeout}s. "
+                    f"Increase {DB_POOL_MAX_SIZE_ENV} or {DB_POOL_BORROW_TIMEOUT_ENV}."
+                ) from None
             if self._is_usable(connection):
                 return connection
             self._discard_connection(connection)
+            # One unusable connection consumed some wait budget; cap remaining
+            # wait at the original timeout so we do not wait indefinitely across
+            # many discards.
+            deadline = min(deadline, self.borrow_timeout)
 
     def _return_connection(self, connection: psycopg.Connection) -> None:
         if self._is_usable(connection):
@@ -116,12 +165,16 @@ class DatabaseConnectionPool:
 
 
 @cache
-def _cached_connection_pool(database_url: str, max_size: int) -> DatabaseConnectionPool:
-    return DatabaseConnectionPool(database_url, max_size=max_size)
+def _cached_connection_pool(database_url: str, max_size: int, borrow_timeout: int) -> DatabaseConnectionPool:
+    return DatabaseConnectionPool(database_url, max_size=max_size, borrow_timeout=borrow_timeout)
 
 
 def get_connection_pool(database_url: str) -> DatabaseConnectionPool:
-    return _cached_connection_pool(database_url, database_pool_max_size())
+    return _cached_connection_pool(
+        database_url,
+        database_pool_max_size(),
+        database_pool_borrow_timeout(),
+    )
 
 
 @contextmanager

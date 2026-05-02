@@ -349,6 +349,7 @@ def _stable_duplicate_token(
 
 def frame_to_tasks(df: pd.DataFrame) -> list[Task]:
     record_id_column = "record_id" if "record_id" in df.columns else "id"
+    has_completed_at = "completed_at" in df.columns
 
     return [
         Task(
@@ -362,9 +363,9 @@ def frame_to_tasks(df: pd.DataFrame) -> list[Task]:
             paused=bool(row["paused"]),
             completed_at=(
                 row["completed_at"]
-                if "completed_at" in df.columns and pd.notna(row["completed_at"])
+                if has_completed_at and pd.notna(row["completed_at"])
                 else None
             ),
         )
-        for _, row in df.iterrows()
+        for row in df.to_dict("records")
     ]

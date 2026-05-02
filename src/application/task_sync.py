@@ -149,8 +149,10 @@ def sync_to_database(source_input: Any, database_url: str) -> SyncSummary:
                     _cursor.execute("SELECT pg_advisory_unlock(%s)", (_SYNC_LOCK_KEY,))
                 connection.rollback()
 
-    assert run_id is not None
-    assert merge_stats is not None
+    if run_id is None:
+        raise RuntimeError("sync_to_database: run_id was never set (ingestion run creation failed).")
+    if merge_stats is None:
+        raise RuntimeError("sync_to_database: merge_stats was never set (merge step did not complete).")
     summary = SyncSummary(
         run_id=run_id,
         source_count=batch.source_count,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -77,7 +78,8 @@ def _check_trusted_proxy(
     if settings.trusted_proxy_secret:
         header_key = settings.trusted_proxy_header.lower()
         incoming = str(headers.get(header_key, headers.get(settings.trusted_proxy_header, ""))).strip()
-        if incoming != settings.trusted_proxy_secret:
+        # Use a constant-time comparison to prevent timing-based secret enumeration.
+        if not hmac.compare_digest(incoming, settings.trusted_proxy_secret):
             return (
                 "Request did not include a valid proxy authorization header. "
                 "Ensure the request passes through the configured trusted proxy."

@@ -129,6 +129,9 @@ class UserAccessRepository:
             component_name=AUTH_SCHEMA_COMPONENT,
             schema_version=AUTH_SCHEMA_VERSION,
         )
+        # Commit the DDL and version record atomically so callers do not need
+        # to remember to commit and a partial failure leaves no orphan tables.
+        self.connection.commit()
 
     def ensure_database_objects(self, *, allow_bootstrap: bool = False) -> None:
         current_version = read_schema_version(self.connection, AUTH_SCHEMA_COMPONENT)
@@ -282,4 +285,15 @@ def open_user_access_repository(
             repository.ensure_database_objects(
                 allow_bootstrap=database_schema_bootstrap_enabled(),
             )
-        yield repository
+        _raised = False
+        try:
+            yield repository
+        except BaseException:
+            _raised = True
+            raise
+        finally:
+            # Commit all auth writes (upsert_user, log_event, log_user_activity)
+            # before the pool's rollback guard discards the transaction.
+            # On exception we let the pool's rollback handle cleanup.
+            if not _raised:
+                connection.commit()

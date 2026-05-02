@@ -31,4 +31,10 @@ ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8501", "--server.addres
 
 FROM base AS sync
 
+# Consider the sync worker unhealthy if no successful sync has been recorded
+# in the last hour (3700 s gives a comfortable margin above the default
+# SYNC_REFRESH_SECONDS=1800 maximum interval).
+HEALTHCHECK --interval=60s --timeout=5s --start-period=60s --retries=3 \
+    CMD python -c "import time, os; s = os.stat('/tmp/sync.ok'); exit(0 if time.time() - s.st_mtime < 3700 else 1)" || exit 1
+
 ENTRYPOINT ["python", "-u", "-m", "src.application.auto_sync"]

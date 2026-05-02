@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import glob
+import ipaddress
 import json
 import os
+import socket
+import time
+import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass
 from io import BytesIO
@@ -21,6 +25,63 @@ SourceList = list[SourceSpec]
 SUPPORTED_FILE_SUFFIXES = {".csv", ".json", ".xls", ".xlsx"}
 TASK_SOURCE_ROOT_ENV = "TASK_SOURCE_ROOT"
 TASK_CSV_CHUNK_ROWS_ENV = "TASK_CSV_CHUNK_ROWS"
+
+# RFC 1918, loopback, link-local, and other non-routable ranges that must not
+# be reachable from an outbound API source fetch (SSRF mitigation).
+_BLOCKED_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
+    ipaddress.ip_network("127.0.0.0/8"),       # IPv4 loopback
+    ipaddress.ip_network("::1/128"),            # IPv6 loopback
+    ipaddress.ip_network("10.0.0.0/8"),         # RFC 1918
+    ipaddress.ip_network("172.16.0.0/12"),      # RFC 1918
+    ipaddress.ip_network("192.168.0.0/16"),     # RFC 1918
+    ipaddress.ip_network("169.254.0.0/16"),     # IPv4 link-local
+    ipaddress.ip_network("fe80::/10"),          # IPv6 link-local
+    ipaddress.ip_network("fc00::/7"),           # IPv6 unique local
+    ipaddress.ip_network("0.0.0.0/8"),          # "this" network
+    ipaddress.ip_network("100.64.0.0/10"),      # CGNAT shared space
+    ipaddress.ip_network("224.0.0.0/4"),        # multicast
+    ipaddress.ip_network("240.0.0.0/4"),        # reserved
+)
+_BLOCKED_HOSTNAMES = frozenset({"localhost", "ip6-localhost", "ip6-loopback"})
+
+
+def validate_http_url(url: str) -> None:
+    """Raise ``ValueError`` if *url* should not be fetched (SSRF mitigation).
+
+    Blocks non-http/https schemes, bare hostnames that resolve to loopback,
+    and all RFC 1918 / link-local / reserved address ranges.
+    """
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(
+            f"API source URL scheme {parsed.scheme!r} is not allowed. "
+            "Only http and https are permitted."
+        )
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise ValueError(f"API source URL has no hostname: {url!r}")
+    if hostname.lower() in _BLOCKED_HOSTNAMES:
+        raise ValueError(
+            f"Requests to {hostname!r} are not permitted as an API source."
+        )
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(
+            f"Cannot resolve API source hostname {hostname!r}: {exc}"
+        ) from exc
+    for _family, _type, _proto, _canonname, sockaddr in addr_infos:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        for network in _BLOCKED_NETWORKS:
+            if ip in network:
+                raise ValueError(
+                    f"Requests to {hostname!r} ({ip}) are not permitted as an "
+                    f"API source: address is in blocked range {network}."
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +212,16 @@ def parse_inline_json(value: str) -> Any | None:
         return None
 
 
-def parse_source_config(source_input: Any) -> TaskSourceConfig:
+_SOURCE_CONFIG_MAX_DEPTH = 5
+
+
+def parse_source_config(source_input: Any, *, _depth: int = 0) -> TaskSourceConfig:
+    if _depth > _SOURCE_CONFIG_MAX_DEPTH:
+        raise ValueError(
+            f"Source config is nested more than {_SOURCE_CONFIG_MAX_DEPTH} levels deep. "
+            "Check for circular or excessively nested config references."
+        )
+
     if is_source_spec_dict(source_input):
         return TaskSourceConfig(sources=[source_input])
 
@@ -163,8 +233,18 @@ def parse_source_config(source_input: Any) -> TaskSourceConfig:
         if sources is None:
             raise ValueError("Source config dict must include a 'sources' key.")
 
+        resolved_sources: list[Any] = []
+        for item in list(sources):
+            if isinstance(item, str):
+                item_parsed = parse_inline_json(item)
+                if isinstance(item_parsed, dict) and "sources" in item_parsed:
+                    nested = parse_source_config(item_parsed, _depth=_depth + 1)
+                    resolved_sources.extend(nested.sources)
+                    continue
+            resolved_sources.append(item)
+
         return TaskSourceConfig(
-            sources=list(sources),
+            sources=resolved_sources,
             union_mode=normalize_union_mode(source_input.get("union_mode", "union")),
         )
 
@@ -178,7 +258,7 @@ def parse_source_config(source_input: Any) -> TaskSourceConfig:
     parsed_json = parse_inline_json(raw_value)
     if parsed_json is not None:
         if isinstance(parsed_json, dict) and "sources" in parsed_json:
-            return parse_source_config(parsed_json)
+            return parse_source_config(parsed_json, _depth=_depth + 1)
         if isinstance(parsed_json, list) and all(
             isinstance(item, str) or is_source_spec_dict(item)
             for item in parsed_json
@@ -190,7 +270,7 @@ def parse_source_config(source_input: Any) -> TaskSourceConfig:
         ensure_local_source_allowed(path)
         payload = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(payload, dict) and "sources" in payload:
-            return parse_source_config(payload)
+            return parse_source_config(payload, _depth=_depth + 1)
 
     if (
         "," in raw_value
@@ -258,7 +338,10 @@ def normalize_source_spec(
     source_order: int | None = None,
 ) -> ResolvedSourceSpec:
     if is_graph_source_spec_dict(source):
-        assert isinstance(source, dict)
+        if not isinstance(source, dict):
+            raise TypeError(
+                f"Expected a dict for a graph source spec, got {type(source).__name__!r}."
+            )
 
         site_url = str(source.get("site_url", "")).strip()
         drive_id = str(source.get("drive_id", "")).strip()
@@ -449,10 +532,27 @@ def read_json_source(source: str) -> pd.DataFrame:
     return pd.DataFrame(extract_json_records(payload))
 
 
+_API_RETRY_STATUSES = {429, 500, 502, 503, 504}
+_API_MAX_RETRIES = 3
+
+
 def read_api_source(source: str) -> pd.DataFrame:
-    response = requests.get(source, timeout=15)
-    response.raise_for_status()
-    return pd.DataFrame(extract_json_records(response.json()))
+    validate_http_url(source)
+    last_exc: Exception | None = None
+    for attempt in range(_API_MAX_RETRIES):
+        try:
+            response = requests.get(source, timeout=15)
+            if response.status_code in _API_RETRY_STATUSES and attempt < _API_MAX_RETRIES - 1:
+                delay = float(response.headers.get("Retry-After", "")) if response.status_code == 429 else 2.0 ** attempt
+                time.sleep(delay)
+                continue
+            response.raise_for_status()
+            return pd.DataFrame(extract_json_records(response.json()))
+        except requests.exceptions.ConnectionError as exc:
+            last_exc = exc
+            if attempt < _API_MAX_RETRIES - 1:
+                time.sleep(2.0 ** attempt)
+    raise RuntimeError(f"API source {source!r} failed after {_API_MAX_RETRIES} attempts") from last_exc
 
 
 def describe_remote_source_state(source_spec: ResolvedSourceSpec) -> dict[str, Any] | None:
@@ -482,6 +582,7 @@ def describe_remote_source_state(source_spec: ResolvedSourceSpec) -> dict[str, A
     if source_kind != "api":
         return None
 
+    validate_http_url(source_spec.source)
     response = requests.head(source_spec.source, timeout=15, allow_redirects=True)
     if response.status_code in {405, 501}:
         response.close()
