@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from functools import lru_cache
+from functools import cache, lru_cache
 from html import escape
 from pathlib import Path
 
