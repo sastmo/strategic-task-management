@@ -15,6 +15,23 @@ permissions:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: test_stm
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
 
     services:
       postgres:
@@ -53,16 +70,8 @@ jobs:
       - name: Verify Python sources compile
         run: python -m compileall src app.py
 
-      - name: Run tests
-        run: pytest tests/ -v --tb=short
-        env:
-          TEST_DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_stm
-
-      - name: Report coverage
-        run: |
-          coverage run -m pytest tests/
-          coverage report
-          coverage xml
+      - name: Run tests with coverage
+        run: pytest tests/ -v --tb=short --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=70
         env:
           TEST_DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_stm
 
@@ -76,3 +85,4 @@ jobs:
         run: docker compose config
         env:
           POSTGRES_PASSWORD: ci-placeholder
+          AUTH_MODE: local

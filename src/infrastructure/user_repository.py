@@ -13,6 +13,17 @@ from src.domain.identity import (
     normalize_email,
     normalize_role_collection,
 )
+from src.infrastructure.db import (
+    DatabaseSchemaError,
+    database_schema_bootstrap_enabled,
+    ensure_schema_state_table,
+    pooled_connection,
+    read_schema_version,
+    write_schema_version,
+)
+
+AUTH_SCHEMA_COMPONENT = "auth_access"
+AUTH_SCHEMA_VERSION = 1
 
 AUTH_SCHEMA_STATEMENTS: tuple[str, ...] = (
     "CREATE SCHEMA IF NOT EXISTS app",
@@ -93,10 +104,61 @@ class UserAccessRepository:
     def __init__(self, connection: psycopg.Connection) -> None:
         self.connection = connection
 
-    def ensure_database_objects(self) -> None:
+    def _required_tables_present(self) -> bool:
+        required_tables = (
+            "app.event_log",
+            "app.user_activity_log",
+            "app.users",
+            "app.user_role_assignments",
+        )
+        with self.connection.cursor() as cursor:
+            for table_name in required_tables:
+                cursor.execute("SELECT to_regclass(%s)", (table_name,))
+                row = cursor.fetchone()
+                if not row or not row[0]:
+                    return False
+        return True
+
+    def bootstrap_database_objects(self) -> None:
+        ensure_schema_state_table(self.connection)
         with self.connection.cursor() as cursor:
             for statement in AUTH_SCHEMA_STATEMENTS:
                 cursor.execute(statement)
+        write_schema_version(
+            self.connection,
+            component_name=AUTH_SCHEMA_COMPONENT,
+            schema_version=AUTH_SCHEMA_VERSION,
+        )
+        # Commit the DDL and version record atomically so callers do not need
+        # to remember to commit and a partial failure leaves no orphan tables.
+        self.connection.commit()
+
+    def ensure_database_objects(self, *, allow_bootstrap: bool = False) -> None:
+        current_version = read_schema_version(self.connection, AUTH_SCHEMA_COMPONENT)
+        if current_version == AUTH_SCHEMA_VERSION:
+            if not self._required_tables_present():
+                raise DatabaseSchemaError(
+                    "The authorization schema version is marked as current, "
+                    "but required tables are missing. Reinitialize or migrate the database."
+                )
+            return
+
+        if current_version is None and allow_bootstrap:
+            self.bootstrap_database_objects()
+            return
+
+        if current_version is None:
+            raise DatabaseSchemaError(
+                "The authorization database schema is not initialized. "
+                "Set DB_BOOTSTRAP_SCHEMA=1 for an explicit local bootstrap, "
+                "or initialize the database before starting the app."
+            )
+
+        raise DatabaseSchemaError(
+            "The authorization database schema version is incompatible. "
+            f"Expected {AUTH_SCHEMA_VERSION}, found {current_version}. "
+            "Apply the required database migration before running this service."
+        )
 
     def upsert_user(self, user: AuthenticatedUser) -> None:
         with self.connection.cursor() as cursor:
@@ -217,8 +279,21 @@ def open_user_access_repository(
         yield None
         return
 
-    with psycopg.connect(database_url) as connection:
+    with pooled_connection(database_url) as connection:
         repository = UserAccessRepository(connection)
         if ensure_objects:
-            repository.ensure_database_objects()
-        yield repository
+            repository.ensure_database_objects(
+                allow_bootstrap=database_schema_bootstrap_enabled(),
+            )
+        _raised = False
+        try:
+            yield repository
+        except BaseException:
+            _raised = True
+            raise
+        finally:
+            # Commit all auth writes (upsert_user, log_event, log_user_activity)
+            # before the pool's rollback guard discards the transaction.
+            # On exception we let the pool's rollback handle cleanup.
+            if not _raised:
+                connection.commit()

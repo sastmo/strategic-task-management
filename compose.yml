@@ -31,6 +31,8 @@ services:
       - ./data:/app/data:ro
     environment:
       DATABASE_URL: *database-url
+      DB_BOOTSTRAP_SCHEMA: ${DB_BOOTSTRAP_SCHEMA:-true}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-4}
       GRAPH_AUTH_MODE: ${GRAPH_AUTH_MODE:-client_secret}
       GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
       GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
@@ -61,6 +63,8 @@ services:
       TASKS_SOURCE: *database-url
       APP_REFRESH_MS: ${APP_REFRESH_MS:-60000}
       DATABASE_URL: *database-url
+      DB_BOOTSTRAP_SCHEMA: ${DB_BOOTSTRAP_SCHEMA:-true}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-4}
       GRAPH_AUTH_MODE: ${GRAPH_AUTH_MODE:-client_secret}
       GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
       GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
@@ -69,7 +73,7 @@ services:
       GRAPH_TIMEOUT_SECONDS: ${GRAPH_TIMEOUT_SECONDS:-30}
       TASK_SOURCE_ROOT: ${TASK_SOURCE_ROOT:-/app/data}
       TASK_CSV_CHUNK_ROWS: ${TASK_CSV_CHUNK_ROWS:-}
-      AUTH_MODE: ${AUTH_MODE:-local}
+      AUTH_MODE: ${AUTH_MODE:?AUTH_MODE must be set (local | app_service | disabled)}
       AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
       AUTH_REQUIRE_EXPLICIT_ACCESS: ${AUTH_REQUIRE_EXPLICIT_ACCESS:-false}
       AUTH_DEFAULT_ROLE: ${AUTH_DEFAULT_ROLE:-viewer}

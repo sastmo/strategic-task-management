@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from functools import cache, lru_cache
 from html import escape
@@ -277,17 +278,34 @@ def load_dashboard_template() -> str:
     return template_path.read_text(encoding="utf-8")
 
 
-@cache
+@lru_cache(maxsize=32)
 def load_dashboard_asset(name: str) -> str:
     asset_path = Path(__file__).resolve().parent / "assets" / name
     return asset_path.read_text(encoding="utf-8")
 
 
+def safe_json_for_html(obj: object) -> str:
+    """Serialize *obj* to JSON that is safe to embed inside an HTML <script> block.
+
+    json.dumps does not escape the sequence </  which would allow a task name
+    like </script> to break out of the enclosing script tag and inject
+    arbitrary HTML.  Replacing </ with <\\/ is the standard mitigation and
+    is semantically equivalent inside JSON string values.
+    """
+    return json.dumps(obj).replace("</", "<\\/").replace("<!--", "<\\!--")
+
+
 def render_dashboard_template(replacements: dict[str, str]) -> str:
+    """Replace all placeholder keys in the HTML template in a single pass.
+
+    A sequential str.replace loop has a collision risk: if an early
+    replacement injects a string that matches a later placeholder key, that
+    string gets double-substituted.  A single regex sub eliminates the risk
+    because each position in the source is visited exactly once.
+    """
     html = load_dashboard_template()
-    for key, value in replacements.items():
-        html = html.replace(key, value)
-    return html
+    pattern = re.compile("|".join(re.escape(k) for k in replacements))
+    return pattern.sub(lambda m: replacements[m.group(0)], html)
 
 
 def build_dashboard_html(
@@ -296,7 +314,7 @@ def build_dashboard_html(
     now: datetime | None = None,
     done_retention_days: int = OWNER_DONE_RETENTION_DAYS,
 ) -> str:
-    tasks_json = json.dumps(build_task_payload(tasks))
+    tasks_json = safe_json_for_html(build_task_payload(tasks))
     owners_html = owner_cards_html(
         tasks,
         now=now,

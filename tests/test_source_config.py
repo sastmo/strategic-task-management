@@ -21,15 +21,16 @@ class SourceConfigTests(unittest.TestCase):
             (directory / "alpha.csv").write_text("name,currentImpact,futureImpact,progress\nA,1,2,3\n", encoding="utf-8")
             (directory / "beta.json").write_text("[]", encoding="utf-8")
 
-            sources = expand_source_specs(
-                [
-                    {
-                        "source": str(directory),
-                        "source_name": "shared_feed",
-                        "source_priority": 250,
-                    }
-                ]
-            )
+            with patch.dict("os.environ", {"TASK_SOURCE_ROOT": str(directory)}, clear=False):
+                sources = expand_source_specs(
+                    [
+                        {
+                            "source": str(directory),
+                            "source_name": "shared_feed",
+                            "source_priority": 250,
+                        }
+                    ]
+                )
 
         self.assertEqual(len(sources), 2)
         self.assertEqual({source.source_name for source in sources}, {"shared_feed"})
@@ -61,6 +62,18 @@ class SourceConfigTests(unittest.TestCase):
 
         self.assertEqual(len(sources), 1)
         self.assertEqual(Path(sources[0].source).name, "tasks.csv")
+
+    def test_local_sources_fail_clearly_when_source_root_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "tasks.csv").write_text(
+                "name,currentImpact,futureImpact,progress\nA,1,2,3\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict("os.environ", {}, clear=True):
+                with self.assertRaises(ValueError):
+                    expand_source_specs([str(workspace / "tasks.csv")])
 
 
 if __name__ == "__main__":
