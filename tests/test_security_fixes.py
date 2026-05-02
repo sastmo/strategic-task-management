@@ -8,12 +8,9 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
-import threading
 import time
-import types
 import unittest
 from contextlib import closing
-from queue import LifoQueue
 from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
@@ -370,10 +367,10 @@ class AssertReplacementTests(unittest.TestCase):
     def test_sync_raises_runtime_error_not_assertion_on_missing_run_id(self) -> None:
         """sync_to_database must raise RuntimeError (not AssertionError) for logic failures."""
         # We test the guard condition itself, not the full sync flow.
-        from src.application import task_sync
-
         # Verify the source code no longer contains raw `assert` statements.
         import inspect
+
+        from src.application import task_sync
         source = inspect.getsource(task_sync.sync_to_database)
         self.assertNotIn("\n    assert run_id", source)
         self.assertNotIn("\n    assert merge_stats", source)
@@ -388,11 +385,14 @@ class SourceConfigRecursionDepthTests(unittest.TestCase):
     """parse_source_config must refuse configs nested deeper than _SOURCE_CONFIG_MAX_DEPTH."""
 
     def test_deeply_nested_inline_json_raises_value_error(self) -> None:
-        from src.infrastructure.sources import _SOURCE_CONFIG_MAX_DEPTH, parse_source_config
-
         # Build a config that nests one level deeper than the allowed max.
         # Each level is {"sources": [inner_json_string]}.
         import json as _json
+
+        from src.infrastructure.sources import (
+            _SOURCE_CONFIG_MAX_DEPTH,
+            parse_source_config,
+        )
 
         inner: object = ["/tmp/tasks.csv"]
         for _ in range(_SOURCE_CONFIG_MAX_DEPTH + 1):
@@ -421,6 +421,7 @@ class PoolConfigErrorTests(unittest.TestCase):
         with patch.dict("os.environ", {"DB_POOL_MAX_SIZE": "four"}, clear=False):
             # Force reload to bypass cache.
             import importlib
+
             import src.infrastructure.db as db_mod
             importlib.reload(db_mod)
             with self.assertRaises(ValueError) as ctx:
@@ -430,6 +431,7 @@ class PoolConfigErrorTests(unittest.TestCase):
     def test_negative_max_size_includes_value_in_message(self) -> None:
         with patch.dict("os.environ", {"DB_POOL_MAX_SIZE": "-3"}, clear=False):
             import importlib
+
             import src.infrastructure.db as db_mod
             importlib.reload(db_mod)
             with self.assertRaises(ValueError) as ctx:
@@ -445,6 +447,7 @@ class PoolConfigErrorTests(unittest.TestCase):
     def test_borrow_timeout_non_numeric_raises_value_error(self) -> None:
         with patch.dict("os.environ", {"DB_POOL_BORROW_TIMEOUT": "fast"}, clear=False):
             import importlib
+
             import src.infrastructure.db as db_mod
             importlib.reload(db_mod)
             with self.assertRaises(ValueError) as ctx:
@@ -454,6 +457,7 @@ class PoolConfigErrorTests(unittest.TestCase):
     def test_borrow_timeout_zero_raises_value_error(self) -> None:
         with patch.dict("os.environ", {"DB_POOL_BORROW_TIMEOUT": "0"}, clear=False):
             import importlib
+
             import src.infrastructure.db as db_mod
             importlib.reload(db_mod)
             with self.assertRaises(ValueError) as ctx:
@@ -602,6 +606,7 @@ class WriteHealthSignalTests(unittest.TestCase):
     def test_health_signal_written_to_path(self) -> None:
         import tempfile
         from pathlib import Path
+
         from src.application import auto_sync as mod
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -612,6 +617,7 @@ class WriteHealthSignalTests(unittest.TestCase):
 
     def test_health_signal_swallows_os_error(self) -> None:
         from pathlib import Path
+
         from src.application import auto_sync as mod
 
         bad_path = Path("/nonexistent_root/sync.ok")

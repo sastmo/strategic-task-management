@@ -163,10 +163,10 @@ def build_token_credential(settings: GraphAuthSettings):
 # Module-level cache so the sync worker reuses a single session and credential
 # object across poll cycles.  Keyed on (auth_mode, tenant_id, client_id,
 # base_url) — enough to detect a configuration change without storing secrets.
-_client_cache: dict[tuple[str, str, str, str], "GraphFileClient"] = {}
+_client_cache: dict[tuple[str, str, str, str], GraphFileClient] = {}
 
 
-def _get_cached_client(settings: GraphAuthSettings) -> "GraphFileClient":
+def _get_cached_client(settings: GraphAuthSettings) -> GraphFileClient:
     key = (settings.auth_mode, settings.tenant_id, settings.client_id, settings.base_url)
     if key not in _client_cache:
         _client_cache[key] = GraphFileClient(settings)
