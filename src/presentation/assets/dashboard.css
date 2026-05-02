@@ -59,6 +59,24 @@ body {
   display: inline-block;
 }
 
+.data-freshness {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.freshness-label {
+  color: __TEXT_MUTED2__;
+}
+
+.freshness-stale {
+  color: #f59e0b;
+}
+
+.freshness-unknown {
+  color: __TEXT_MUTED2__;
+  font-style: italic;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(340px, 0.95fr);

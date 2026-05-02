@@ -28,6 +28,10 @@ omit = [
     "src/infrastructure/graph/client.py",
     # Requires Azure AD credentials
     "src/infrastructure/azure/*",
+    # Pure PostgreSQL access layers — covered by integration tests gated on
+    # TEST_DATABASE_URL; meaningless to mock at unit-test level
+    "src/infrastructure/task_store.py",
+    "src/infrastructure/user_repository.py",
 ]
 
 [tool.coverage.report]

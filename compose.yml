@@ -73,6 +73,7 @@ services:
       GRAPH_TIMEOUT_SECONDS: ${GRAPH_TIMEOUT_SECONDS:-30}
       TASK_SOURCE_ROOT: ${TASK_SOURCE_ROOT:-/app/data}
       TASK_CSV_CHUNK_ROWS: ${TASK_CSV_CHUNK_ROWS:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       AUTH_MODE: ${AUTH_MODE:?AUTH_MODE must be set (local | app_service | disabled)}
       AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
       AUTH_REQUIRE_EXPLICIT_ACCESS: ${AUTH_REQUIRE_EXPLICIT_ACCESS:-false}

@@ -109,16 +109,54 @@ class AutoSyncSettings:
     verbose_idle: bool
 
 
+def _reject_in_production(flag_name: str, override_env: str, guidance: str) -> None:
+    """Raise RuntimeError if *flag_name* is set and ENVIRONMENT=production.
+
+    Production deployments must not enable permissive development flags.  Each
+    dangerous flag must be explicitly rejected so the app fails at startup
+    rather than silently running with an unsafe configuration.
+    """
+    environment = os.getenv("ENVIRONMENT", "").strip().lower()
+    if environment != "production":
+        return
+    if env_flag(override_env):
+        return
+    raise RuntimeError(
+        f"{flag_name} is not allowed when ENVIRONMENT=production. "
+        f"{guidance}"
+    )
+
+
 def load_auth_settings() -> AuthSettings:
     mode = normalize_auth_mode(os.getenv("AUTH_MODE", "local"))
 
+    # AUTH_MODE=local bypasses real identity verification entirely.
     if mode == "local":
+        _reject_in_production(
+            "AUTH_MODE=local",
+            "ALLOW_LOCAL_AUTH_IN_PRODUCTION",
+            "Switch to AUTH_MODE=app_service or set ALLOW_LOCAL_AUTH_IN_PRODUCTION=1 "
+            "to override (not recommended for real deployments).",
+        )
+
+    # AUTH_MODE=disabled grants access with no identity check at all.
+    if mode == "disabled":
+        _reject_in_production(
+            "AUTH_MODE=disabled",
+            "ALLOW_DISABLED_AUTH_IN_PRODUCTION",
+            "Switch to AUTH_MODE=app_service or set ALLOW_DISABLED_AUTH_IN_PRODUCTION=1 "
+            "to override (not recommended).",
+        )
+
+    # AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY=1 skips proxy secret validation,
+    # allowing any caller to forge Azure identity headers.
+    allow_unverified_proxy = env_flag("AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY")
+    if allow_unverified_proxy:
         environment = os.getenv("ENVIRONMENT", "").strip().lower()
-        if environment == "production" and not env_flag("ALLOW_LOCAL_AUTH_IN_PRODUCTION"):
+        if environment == "production":
             raise RuntimeError(
-                "AUTH_MODE=local is not allowed when ENVIRONMENT=production. "
-                "Switch to AUTH_MODE=app_service or set ALLOW_LOCAL_AUTH_IN_PRODUCTION=1 "
-                "to override (not recommended for real deployments)."
+                "AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY=1 is not allowed when "
+                "ENVIRONMENT=production. Set APP_TRUSTED_PROXY_SECRET instead."
             )
 
     local_user_email = os.getenv("AUTH_LOCAL_USER_EMAIL", DEFAULT_LOCAL_USER_EMAIL).strip().lower()
@@ -142,7 +180,7 @@ def load_auth_settings() -> AuthSettings:
         trusted_proxy_secret=os.getenv("APP_TRUSTED_PROXY_SECRET", "").strip(),
         trusted_proxy_header=os.getenv("APP_TRUSTED_PROXY_HEADER", _DEFAULT_PROXY_HEADER).strip()
         or _DEFAULT_PROXY_HEADER,
-        allow_unverified_proxy=env_flag("AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY"),
+        allow_unverified_proxy=allow_unverified_proxy,
     )
 
 

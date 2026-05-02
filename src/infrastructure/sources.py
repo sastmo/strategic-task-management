@@ -25,6 +25,14 @@ SourceList = list[SourceSpec]
 SUPPORTED_FILE_SUFFIXES = {".csv", ".json", ".xls", ".xlsx"}
 TASK_SOURCE_ROOT_ENV = "TASK_SOURCE_ROOT"
 TASK_CSV_CHUNK_ROWS_ENV = "TASK_CSV_CHUNK_ROWS"
+TASK_SOURCE_ALLOWED_KINDS_ENV = "TASK_SOURCE_ALLOWED_KINDS"
+
+# In production, generic HTTP API sources introduce SSRF risk, allow arbitrary
+# external data, and have no data-quality guarantees.  Block them by default
+# when ENVIRONMENT=production unless TASK_SOURCE_ALLOWED_KINDS explicitly
+# lists "api".  Local file sources and graph/postgres remain unrestricted
+# because they are already sandboxed by TASK_SOURCE_ROOT and DB credentials.
+_PRODUCTION_BLOCKED_SOURCE_KINDS: frozenset[str] = frozenset({"api"})
 
 # RFC 1918, loopback, link-local, and other non-routable ranges that must not
 # be reachable from an outbound API source fetch (SSRF mitigation).
@@ -43,6 +51,41 @@ _BLOCKED_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
     ipaddress.ip_network("240.0.0.0/4"),        # reserved
 )
 _BLOCKED_HOSTNAMES = frozenset({"localhost", "ip6-localhost", "ip6-loopback"})
+
+
+def _configured_allowed_source_kinds() -> frozenset[str] | None:
+    raw = os.getenv(TASK_SOURCE_ALLOWED_KINDS_ENV, "").strip()
+    if not raw:
+        return None
+    return frozenset(k.strip().lower() for k in raw.split(",") if k.strip())
+
+
+def check_source_kind_allowed(kind: str) -> None:
+    """Raise ValueError if *kind* is not permitted in the current environment.
+
+    The explicit allowlist (TASK_SOURCE_ALLOWED_KINDS) takes precedence over
+    the production default block.  When neither is configured, all source kinds
+    are allowed in non-production environments.
+    """
+    explicit = _configured_allowed_source_kinds()
+    if explicit is not None:
+        if kind.lower() not in explicit:
+            raise ValueError(
+                f"Source kind {kind!r} is not in TASK_SOURCE_ALLOWED_KINDS. "
+                f"Allowed: {sorted(explicit)}. "
+                "Update TASK_SOURCE_ALLOWED_KINDS to include this source kind."
+            )
+        return
+
+    environment = os.getenv("ENVIRONMENT", "").strip().lower()
+    if environment == "production" and kind.lower() in _PRODUCTION_BLOCKED_SOURCE_KINDS:
+        raise ValueError(
+            f"Source kind {kind!r} is not allowed in production. "
+            "Generic HTTP API sources are disabled by default to reduce SSRF and "
+            "external data integrity risk. Use postgres, graph (SharePoint/OneDrive), "
+            "or local file sources instead. "
+            "Set TASK_SOURCE_ALLOWED_KINDS=api to explicitly re-enable this source kind."
+        )
 
 
 def validate_http_url(url: str) -> None:
@@ -801,6 +844,7 @@ def read_source_spec_to_frames(source: ResolvedSourceSpec | SourceSpec) -> list[
         ]
 
     if kind == "api":
+        check_source_kind_allowed("api")
         return [
             add_source_metadata(
                 read_api_source(source_spec.source),

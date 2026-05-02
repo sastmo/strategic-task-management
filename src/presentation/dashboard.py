@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
-from functools import cache, lru_cache
+from datetime import UTC, datetime
+from functools import lru_cache
 from html import escape
 from pathlib import Path
 
@@ -308,11 +308,46 @@ def render_dashboard_template(replacements: dict[str, str]) -> str:
     return pattern.sub(lambda m: replacements[m.group(0)], html)
 
 
+def format_data_freshness(last_sync: datetime | None, *, now: datetime | None = None) -> str:
+    """Return an HTML snippet for the data-freshness badge.
+
+    Shows "Updated X minutes/hours/days ago" when a sync timestamp is known.
+    Shows "Data freshness unknown" when no successful sync has been recorded
+    (e.g. first boot, file-only mode without a database).
+    """
+    if last_sync is None:
+        return '<span class="freshness-unknown">Data freshness unknown</span>'
+
+    reference = now or datetime.now(tz=UTC)
+    if last_sync.tzinfo is None:
+        last_sync = last_sync.replace(tzinfo=UTC)
+
+    delta_seconds = int((reference - last_sync).total_seconds())
+
+    if delta_seconds < 60:
+        age = "just now"
+    elif delta_seconds < 3600:
+        minutes = delta_seconds // 60
+        age = f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    elif delta_seconds < 86400:
+        hours = delta_seconds // 3600
+        age = f"{hours} hour{'s' if hours != 1 else ''} ago"
+    else:
+        days = delta_seconds // 86400
+        age = f"{days} day{'s' if days != 1 else ''} ago"
+
+    # Highlight stale data (>2 hours) so C-level readers can spot it immediately.
+    stale_class = " freshness-stale" if delta_seconds > 7200 else ""
+    safe_age = escape(age)
+    return f'<span class="freshness-label{stale_class}">Updated {safe_age}</span>'
+
+
 def build_dashboard_html(
     tasks: list[Task],
     *,
     now: datetime | None = None,
     done_retention_days: int = OWNER_DONE_RETENTION_DAYS,
+    last_sync: datetime | None = None,
 ) -> str:
     tasks_json = safe_json_for_html(build_task_payload(tasks))
     owners_html = owner_cards_html(
@@ -332,6 +367,7 @@ def build_dashboard_html(
             "__TASKS_JSON__": tasks_json,
             "__OWNERS_HTML__": owners_html,
             "__ROLE_LEGEND__": role_legend,
+            "__DATA_FRESHNESS__": format_data_freshness(last_sync, now=now),
             "__DASHBOARD_CSS__": load_dashboard_asset("dashboard.css"),
             "__DASHBOARD_JS__": load_dashboard_asset("dashboard.js"),
             "__BG__": BG,

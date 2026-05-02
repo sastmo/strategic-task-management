@@ -928,6 +928,32 @@ class TaskWarehouseStore:
         return len(deleted_rows)
 
 
+def load_last_sync_timestamp(database_url: str) -> datetime | None:
+    """Return the finished_at timestamp of the most recent successful ingestion run.
+
+    Returns None when the database is unavailable, no table exists yet, or no
+    successful run has been recorded -- all treated as "unknown freshness" so
+    the dashboard can display an appropriate message rather than crashing.
+    """
+    try:
+        with pooled_connection(database_url) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT finished_at
+                    FROM ops.ingestion_runs
+                    WHERE status = 'success'
+                      AND finished_at IS NOT NULL
+                    ORDER BY finished_at DESC
+                    LIMIT 1
+                    """
+                )
+                row = cursor.fetchone()
+            return _to_optional_datetime(row[0]) if row else None
+    except Exception:
+        return None
+
+
 def load_tasks_from_database(database_url: str) -> list[Task]:
     with pooled_connection(database_url) as connection:
         store = TaskWarehouseStore(connection)
