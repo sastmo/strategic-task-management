@@ -70,3 +70,4 @@ jobs:
         run: docker compose config
         env:
           POSTGRES_PASSWORD: ci-placeholder
+          AUTH_MODE: local
