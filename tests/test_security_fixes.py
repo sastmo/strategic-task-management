@@ -154,7 +154,7 @@ class AuthWriteCommitTests(unittest.TestCase):
 class ConnectionPoolTimeoutTests(unittest.TestCase):
     """Pool must raise TimeoutError instead of blocking forever when exhausted."""
 
-    def _make_pool(self, max_size: int = 1, borrow_timeout: int = 1) -> object:
+    def _make_pool(self, max_size: int = 1, borrow_timeout: int = 1):
         from src.infrastructure.db import DatabaseConnectionPool
 
         pool = DatabaseConnectionPool(
@@ -473,7 +473,7 @@ class PoolConfigErrorTests(unittest.TestCase):
 class AutoSyncMonitorTests(unittest.TestCase):
     """AutoSyncMonitor unit tests using injected fakes — no real DB or file I/O."""
 
-    def _make_settings(self, source_input: str = "/tmp/data") -> object:
+    def _make_settings(self, source_input: str = "/tmp/data"):
         from src.application.settings import AutoSyncSettings
         return AutoSyncSettings(
             source_input=source_input,
@@ -632,7 +632,7 @@ class WriteHealthSignalTests(unittest.TestCase):
 
 
 class SyncSummaryTests(unittest.TestCase):
-    def _make_summary(self) -> object:
+    def _make_summary(self):
         from src.application.task_sync import SyncSummary
         return SyncSummary(
             run_id=42,
