@@ -126,6 +126,63 @@ def validate_http_url(url: str) -> None:
                     f"API source: address is in blocked range {network}."
                 )
 
+# RFC 1918, loopback, link-local, and other non-routable ranges that must not
+# be reachable from an outbound API source fetch (SSRF mitigation).
+_BLOCKED_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
+    ipaddress.ip_network("127.0.0.0/8"),       # IPv4 loopback
+    ipaddress.ip_network("::1/128"),            # IPv6 loopback
+    ipaddress.ip_network("10.0.0.0/8"),         # RFC 1918
+    ipaddress.ip_network("172.16.0.0/12"),      # RFC 1918
+    ipaddress.ip_network("192.168.0.0/16"),     # RFC 1918
+    ipaddress.ip_network("169.254.0.0/16"),     # IPv4 link-local
+    ipaddress.ip_network("fe80::/10"),          # IPv6 link-local
+    ipaddress.ip_network("fc00::/7"),           # IPv6 unique local
+    ipaddress.ip_network("0.0.0.0/8"),          # "this" network
+    ipaddress.ip_network("100.64.0.0/10"),      # CGNAT shared space
+    ipaddress.ip_network("224.0.0.0/4"),        # multicast
+    ipaddress.ip_network("240.0.0.0/4"),        # reserved
+)
+_BLOCKED_HOSTNAMES = frozenset({"localhost", "ip6-localhost", "ip6-loopback"})
+
+
+def validate_http_url(url: str) -> None:
+    """Raise ``ValueError`` if *url* should not be fetched (SSRF mitigation).
+
+    Blocks non-http/https schemes, bare hostnames that resolve to loopback,
+    and all RFC 1918 / link-local / reserved address ranges.
+    """
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(
+            f"API source URL scheme {parsed.scheme!r} is not allowed. "
+            "Only http and https are permitted."
+        )
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise ValueError(f"API source URL has no hostname: {url!r}")
+    if hostname.lower() in _BLOCKED_HOSTNAMES:
+        raise ValueError(
+            f"Requests to {hostname!r} are not permitted as an API source."
+        )
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(
+            f"Cannot resolve API source hostname {hostname!r}: {exc}"
+        ) from exc
+    for _family, _type, _proto, _canonname, sockaddr in addr_infos:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        for network in _BLOCKED_NETWORKS:
+            if ip in network:
+                raise ValueError(
+                    f"Requests to {hostname!r} ({ip}) are not permitted as an "
+                    f"API source: address is in blocked range {network}."
+                )
+
 
 @dataclass(frozen=True, slots=True)
 class TaskSourceConfig:
