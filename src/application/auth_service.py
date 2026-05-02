@@ -290,6 +290,73 @@ def resolve_roles(
     return ()
 
 
+def build_db_unavailable_context(settings: AuthSettings) -> AuthorizationContext:
+    """Return a fail-closed access_denied context when the database is unavailable.
+
+    Called when AUTH_USE_DATABASE_ROLES=true and the database cannot be reached.
+    Denying access rather than falling through prevents a DB outage from
+    silently bypassing role verification.
+    """
+    sign_in_url = (
+        build_app_service_login_url(settings.app_service_provider)
+        if settings.mode == "app_service"
+        else None
+    )
+    sign_out_url = (
+        build_app_service_logout_url()
+        if settings.mode == "app_service"
+        else None
+    )
+    return AuthorizationContext(
+        state="access_denied",
+        user=None,
+        permissions=PermissionSet(),
+        message=(
+            "Authorization is temporarily unavailable. "
+            "Please try again in a moment or contact your administrator."
+        ),
+        auth_mode=settings.mode,
+        sign_in_url=sign_in_url,
+        sign_out_url=sign_out_url,
+    )
+
+
+def resolve_auth_on_db_error(
+    *,
+    headers: Mapping[str, Any],
+    settings: AuthSettings,
+    exc: Exception,
+) -> AuthorizationContext:
+    """Handle a database error during auth context resolution.
+
+    When AUTH_USE_DATABASE_ROLES=true the database is the authoritative source
+    of role assignments.  If it is unavailable we must deny access rather than
+    grant a potentially incorrect level of access based only on token claims.
+
+    When the database is used only for audit logging (use_database_roles=false)
+    we tolerate the failure and resolve roles from token claims alone.
+    """
+    if settings.use_database_roles:
+        _logger.error(
+            "Database unavailable with AUTH_USE_DATABASE_ROLES=true; "
+            "denying access to fail closed. (%s: %s)",
+            type(exc).__name__,
+            exc,
+        )
+        return build_db_unavailable_context(settings)
+
+    _logger.warning(
+        "Authorization database unavailable; continuing without audit. (%s: %s)",
+        type(exc).__name__,
+        exc,
+    )
+    return resolve_request_authorization(
+        headers=headers,
+        settings=settings,
+        repository=None,
+    )
+
+
 def record_authorized_session(
     *,
     auth_context: AuthorizationContext,

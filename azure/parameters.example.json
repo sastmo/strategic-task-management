@@ -1,0 +1,68 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "canadacentral"
+    },
+    "environmentName": {
+      "value": "stm-prod"
+    },
+    "containerRegistryServer": {
+      "value": "YOURREGISTRY.azurecr.io"
+    },
+    "appImageTag": {
+      "value": "YOURREGISTRY.azurecr.io/stm-app:latest"
+    },
+    "syncImageTag": {
+      "value": "YOURREGISTRY.azurecr.io/stm-sync:latest"
+    },
+    "databaseUrl": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/SUB_ID/resourceGroups/RG_NAME/providers/Microsoft.KeyVault/vaults/VAULT_NAME"
+        },
+        "secretName": "stm-database-url"
+      }
+    },
+    "postgresPassword": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/SUB_ID/resourceGroups/RG_NAME/providers/Microsoft.KeyVault/vaults/VAULT_NAME"
+        },
+        "secretName": "stm-postgres-password"
+      }
+    },
+    "allowedTenantId": {
+      "value": "YOUR_AZURE_AD_TENANT_ID"
+    },
+    "viewerGroupIds": {
+      "value": "GROUP_OBJECT_ID_1,GROUP_OBJECT_ID_2"
+    },
+    "adminGroupIds": {
+      "value": "ADMIN_GROUP_OBJECT_ID"
+    },
+    "trustedProxySecret": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/SUB_ID/resourceGroups/RG_NAME/providers/Microsoft.KeyVault/vaults/VAULT_NAME"
+        },
+        "secretName": "stm-proxy-secret"
+      }
+    },
+    "graphTenantId": {
+      "value": "YOUR_AZURE_AD_TENANT_ID"
+    },
+    "graphClientId": {
+      "value": "YOUR_GRAPH_APP_CLIENT_ID"
+    },
+    "graphClientSecret": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/SUB_ID/resourceGroups/RG_NAME/providers/Microsoft.KeyVault/vaults/VAULT_NAME"
+        },
+        "secretName": "stm-graph-client-secret"
+      }
+    }
+  }
+}

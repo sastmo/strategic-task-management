@@ -5,7 +5,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.infrastructure.sources import expand_source_specs, parse_source_config
+from src.infrastructure.sources import (
+    check_source_kind_allowed,
+    expand_source_specs,
+    parse_source_config,
+)
 
 
 class SourceConfigTests(unittest.TestCase):
@@ -74,6 +78,54 @@ class SourceConfigTests(unittest.TestCase):
             with patch.dict("os.environ", {}, clear=True):
                 with self.assertRaises(ValueError):
                     expand_source_specs([str(workspace / "tasks.csv")])
+
+
+class ProductionSourceKindAllowlistTests(unittest.TestCase):
+    """check_source_kind_allowed must block api kind in production by default."""
+
+    def test_api_blocked_in_production_by_default(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ENVIRONMENT": "production", "TASK_SOURCE_ALLOWED_KINDS": ""},
+            clear=False,
+        ):
+            with self.assertRaises(ValueError, msg="api kind must be blocked in production"):
+                check_source_kind_allowed("api")
+
+    def test_api_allowed_in_development(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ENVIRONMENT": "development", "TASK_SOURCE_ALLOWED_KINDS": ""},
+            clear=False,
+        ):
+            check_source_kind_allowed("api")  # must not raise
+
+    def test_api_allowed_in_production_when_explicitly_listed(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"ENVIRONMENT": "production", "TASK_SOURCE_ALLOWED_KINDS": "csv,json,api"},
+            clear=False,
+        ):
+            check_source_kind_allowed("api")  # must not raise
+
+    def test_explicit_allowlist_blocks_unlisted_kind(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"TASK_SOURCE_ALLOWED_KINDS": "csv,json"},
+            clear=False,
+        ):
+            with self.assertRaises(ValueError):
+                check_source_kind_allowed("api")
+
+    def test_non_api_kinds_allowed_in_production_by_default(self) -> None:
+        for kind in ("csv", "json", "excel", "graph", "postgres"):
+            with self.subTest(kind=kind):
+                with patch.dict(
+                    "os.environ",
+                    {"ENVIRONMENT": "production", "TASK_SOURCE_ALLOWED_KINDS": ""},
+                    clear=False,
+                ):
+                    check_source_kind_allowed(kind)  # must not raise
 
 
 if __name__ == "__main__":

@@ -13,10 +13,13 @@ from src.application.auth_service import (
     AuthorizationContext,
     record_authorized_session,
     record_dashboard_view,
+    resolve_auth_on_db_error,
     resolve_request_authorization,
 )
 from src.application.settings import AppSettings, load_app_settings
 from src.application.task_workflow import load_tasks
+from src.infrastructure.sources import is_database_url
+from src.infrastructure.task_store import load_last_sync_timestamp
 from src.infrastructure.user_repository import (
     UserAccessRepository,
     open_user_access_repository,
@@ -97,10 +100,10 @@ def resolve_auth_context(settings: AppSettings) -> tuple[AuthorizationContext, E
                 st.session_state[AUTH_SESSION_RECORDED_KEY] = True
     except Exception as exc:
         repository_error = exc
-        auth_context = resolve_request_authorization(
+        auth_context = resolve_auth_on_db_error(
             headers=headers,
             settings=settings.auth,
-            repository=None,
+            exc=exc,
         )
 
     return auth_context, repository_error
@@ -175,8 +178,14 @@ def main() -> None:
 
     record_dashboard_view_once(settings, auth_context, task_count=len(tasks))
 
+    last_sync = (
+        load_last_sync_timestamp(settings.tasks_source)
+        if is_database_url(settings.tasks_source)
+        else None
+    )
+
     components.html(
-        build_dashboard_html(tasks),
+        build_dashboard_html(tasks, last_sync=last_sync),
         height=settings.dashboard_height,
         scrolling=True,
     )

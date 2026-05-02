@@ -5,6 +5,7 @@ import types
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, Literal
 from unittest.mock import MagicMock, patch
@@ -487,6 +488,130 @@ class AzureHelperTests(unittest.TestCase):
             credential.kwargs,
             {"exclude_interactive_browser_credential": False},
         )
+
+
+class SyncTimestampTests(unittest.TestCase):
+    """load_last_sync_timestamp returns the most recent successful run or None."""
+
+    @contextmanager
+    def _fake_pool(self, row: tuple[object, ...] | None) -> Iterator[MagicMock]:
+        conn = MagicMock()
+        cursor = MagicMock()
+        cursor.__enter__ = lambda s: cursor
+        cursor.__exit__ = MagicMock(return_value=False)
+        cursor.fetchone.return_value = row
+        conn.cursor.return_value = cursor
+        yield conn
+
+    def test_returns_none_when_no_successful_runs(self) -> None:
+        from src.infrastructure.task_store import load_last_sync_timestamp
+
+        with patch(
+            "src.infrastructure.task_store.pooled_connection",
+            side_effect=lambda _url: self._fake_pool(None),
+        ):
+            result = load_last_sync_timestamp("postgresql://fake/db")
+
+        self.assertIsNone(result)
+
+    def test_returns_datetime_when_run_found(self) -> None:
+        from src.infrastructure.task_store import load_last_sync_timestamp
+
+        ts = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
+        with patch(
+            "src.infrastructure.task_store.pooled_connection",
+            side_effect=lambda _url: self._fake_pool((ts,)),
+        ):
+            result = load_last_sync_timestamp("postgresql://fake/db")
+
+        self.assertEqual(result, ts)
+
+    def test_returns_none_on_db_exception(self) -> None:
+        from src.infrastructure.task_store import load_last_sync_timestamp
+
+        with patch(
+            "src.infrastructure.task_store.pooled_connection",
+            side_effect=RuntimeError("db down"),
+        ):
+            result = load_last_sync_timestamp("postgresql://fake/db")
+
+        self.assertIsNone(result)
+
+
+class DataFreshnessFormatTests(unittest.TestCase):
+    """format_data_freshness must produce correct human-readable labels."""
+
+    def _ts(self, seconds_ago: int) -> datetime:
+        from datetime import timedelta
+
+        return datetime.now(tz=UTC) - timedelta(seconds=seconds_ago)
+
+    def test_none_timestamp_shows_unknown(self) -> None:
+        from src.presentation.dashboard import format_data_freshness
+
+        html = format_data_freshness(None)
+        self.assertIn("freshness-unknown", html)
+        self.assertNotIn("Updated", html)
+
+    def test_very_recent_shows_just_now(self) -> None:
+        from src.presentation.dashboard import format_data_freshness
+
+        html = format_data_freshness(self._ts(30))
+        self.assertIn("just now", html)
+        self.assertNotIn("freshness-stale", html)
+
+    def test_minutes_ago(self) -> None:
+        from src.presentation.dashboard import format_data_freshness
+
+        html = format_data_freshness(self._ts(5 * 60))
+        self.assertIn("5 minutes ago", html)
+        self.assertNotIn("freshness-stale", html)
+
+    def test_one_minute_singular(self) -> None:
+        from src.presentation.dashboard import format_data_freshness
+
+        html = format_data_freshness(self._ts(90))
+        self.assertIn("1 minute ago", html)
+        self.assertNotIn("freshness-stale", html)
+
+    def test_hours_ago(self) -> None:
+        from src.presentation.dashboard import format_data_freshness
+
+        html = format_data_freshness(self._ts(3 * 3600))
+        self.assertIn("3 hours ago", html)
+        self.assertIn("freshness-stale", html)
+
+    def test_one_hour_singular(self) -> None:
+        from src.presentation.dashboard import format_data_freshness
+
+        html = format_data_freshness(self._ts(3700))
+        self.assertIn("1 hour ago", html)
+        self.assertNotIn("freshness-stale", html)
+
+    def test_days_ago(self) -> None:
+        from src.presentation.dashboard import format_data_freshness
+
+        html = format_data_freshness(self._ts(2 * 86400 + 100))
+        self.assertIn("2 days ago", html)
+        self.assertIn("freshness-stale", html)
+
+    def test_stale_threshold_is_two_hours(self) -> None:
+        from src.presentation.dashboard import format_data_freshness
+
+        fresh = format_data_freshness(self._ts(7199))
+        stale = format_data_freshness(self._ts(7201))
+        self.assertNotIn("freshness-stale", fresh)
+        self.assertIn("freshness-stale", stale)
+
+    def test_naive_datetime_treated_as_utc(self) -> None:
+        from datetime import datetime
+
+        from src.presentation.dashboard import format_data_freshness
+
+        naive = datetime(2000, 1, 1, 0, 0, 0)
+        now = datetime(2000, 1, 1, 1, 0, 0, tzinfo=UTC)
+        html = format_data_freshness(naive, now=now)
+        self.assertIn("1 hour ago", html)
 
 
 class LazyExportTests(unittest.TestCase):
