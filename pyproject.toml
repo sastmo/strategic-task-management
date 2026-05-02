@@ -21,6 +21,14 @@ ignore = ["E501"]
 [tool.coverage.run]
 branch = true
 source = ["src"]
+omit = [
+    # Requires a running Streamlit session — not unit-testable
+    "src/presentation/auth_ui.py",
+    # Requires live Microsoft Graph API credentials
+    "src/infrastructure/graph/client.py",
+    # Requires Azure AD credentials
+    "src/infrastructure/azure/*",
+]
 
 [tool.coverage.report]
 skip_covered = true
