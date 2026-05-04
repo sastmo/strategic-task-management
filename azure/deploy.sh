@@ -28,6 +28,7 @@ ENV_NAME="${ENV_NAME:-stm-prod}"
 REGISTRY="${REGISTRY:-}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 PARAMETERS_FILE="${SCRIPT_DIR}/parameters.json"
+DEPLOYMENT_NAME="${DEPLOYMENT_NAME:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,9 +37,14 @@ while [[ $# -gt 0 ]]; do
     --registry|-r)       REGISTRY="$2";       shift 2 ;;
     --tag|-t)            IMAGE_TAG="$2";       shift 2 ;;
     --parameters|-p)     PARAMETERS_FILE="$2"; shift 2 ;;
+    --deployment-name)    DEPLOYMENT_NAME="$2"; shift 2 ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
+
+if [[ -z "${DEPLOYMENT_NAME}" ]]; then
+  DEPLOYMENT_NAME="${ENV_NAME}-container-apps"
+fi
 
 if [[ -z "${RESOURCE_GROUP}" ]]; then
   echo "ERROR: --resource-group is required"
@@ -67,16 +73,21 @@ docker push "${SYNC_IMAGE}"
 
 echo "==> Deploying Bicep template"
 az deployment group create \
+  --name "${DEPLOYMENT_NAME}" \
   --resource-group "${RESOURCE_GROUP}" \
   --template-file "${SCRIPT_DIR}/container-apps.bicep" \
   --parameters "@${PARAMETERS_FILE}" \
-  --parameters appImageTag="${APP_IMAGE}" syncImageTag="${SYNC_IMAGE}" \
+  --parameters \
+    environmentName="${ENV_NAME}" \
+    containerRegistryServer="${REGISTRY}" \
+    appImageTag="${APP_IMAGE}" \
+    syncImageTag="${SYNC_IMAGE}" \
   --output table
 
 echo ""
 FQDN=$(az deployment group show \
   --resource-group "${RESOURCE_GROUP}" \
-  --name container-apps \
+  --name "${DEPLOYMENT_NAME}" \
   --query properties.outputs.appFqdn.value \
   --output tsv 2>/dev/null || echo "(run 'az deployment group show' to retrieve the URL)")
 
@@ -85,5 +96,5 @@ echo "    App URL: https://${FQDN}"
 echo ""
 echo "    Next steps:"
 echo "    1. Enable Azure App Service Authentication (Easy Auth) on the app container."
-echo "    2. Set AUTH_MODE=app_service and APP_TRUSTED_PROXY_SECRET in application settings."
-echo "    3. Grant the sync managed identity read access to your SharePoint/Graph sources."
+echo "    2. Set bootstrapSchema=true only for the first schema initialization run."
+echo "    3. Grant the sync identity/app registration read access to SharePoint/Graph sources."

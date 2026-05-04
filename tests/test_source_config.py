@@ -6,7 +6,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.infrastructure.sources import (
+    ResolvedSourceSpec,
     check_source_kind_allowed,
+    describe_remote_source_state,
     expand_source_specs,
     parse_source_config,
 )
@@ -126,6 +128,20 @@ class ProductionSourceKindAllowlistTests(unittest.TestCase):
                     clear=False,
                 ):
                     check_source_kind_allowed(kind)  # must not raise
+
+    def test_api_remote_metadata_blocked_in_production_by_default(self) -> None:
+        source = ResolvedSourceSpec(
+            source="https://example.com/tasks",
+            source_name="tasks",
+            kind="api",
+        )
+        with patch.dict(
+            "os.environ",
+            {"ENVIRONMENT": "production", "TASK_SOURCE_ALLOWED_KINDS": ""},
+            clear=False,
+        ):
+            with self.assertRaises(ValueError):
+                describe_remote_source_state(source)
 
 
 if __name__ == "__main__":

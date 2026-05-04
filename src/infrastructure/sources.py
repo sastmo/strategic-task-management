@@ -625,6 +625,7 @@ def describe_remote_source_state(source_spec: ResolvedSourceSpec) -> dict[str, A
     if source_kind != "api":
         return None
 
+    check_source_kind_allowed("api")
     validate_http_url(source_spec.source)
     response = requests.head(source_spec.source, timeout=15, allow_redirects=True)
     if response.status_code in {405, 501}:

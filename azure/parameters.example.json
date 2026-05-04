@@ -25,14 +25,6 @@
         "secretName": "stm-database-url"
       }
     },
-    "postgresPassword": {
-      "reference": {
-        "keyVault": {
-          "id": "/subscriptions/SUB_ID/resourceGroups/RG_NAME/providers/Microsoft.KeyVault/vaults/VAULT_NAME"
-        },
-        "secretName": "stm-postgres-password"
-      }
-    },
     "allowedTenantId": {
       "value": "YOUR_AZURE_AD_TENANT_ID"
     },
@@ -63,6 +55,12 @@
         },
         "secretName": "stm-graph-client-secret"
       }
+    },
+    "syncSourceConfig": {
+      "value": "{\"sources\":[{\"kind\":\"graph\",\"site_url\":\"https://contoso.sharepoint.com/sites/Strategy\",\"drive_name\":\"Shared Documents\",\"file_path\":\"/Plans/master.xlsx\",\"all_sheets\":true}],\"union_mode\":\"union\"}"
+    },
+    "bootstrapSchema": {
+      "value": "false"
     }
   }
 }

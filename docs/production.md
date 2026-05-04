@@ -25,6 +25,8 @@ Setting `ENVIRONMENT=production` enforces the following at startup:
 | `AUTH_MODE=local` | No -- raises `RuntimeError` unless `ALLOW_LOCAL_AUTH_IN_PRODUCTION=1` |
 | `AUTH_MODE=disabled` | No -- raises `RuntimeError` unless `ALLOW_DISABLED_AUTH_IN_PRODUCTION=1` |
 | `AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY=1` | No -- raises `RuntimeError` unconditionally |
+| Missing `APP_TRUSTED_PROXY_SECRET` with `AUTH_MODE=app_service` | No -- raises `RuntimeError` |
+| Non-database `TASKS_SOURCE` | No -- raises `RuntimeError` |
 
 Never set the override flags in a real deployment.  They exist only to document why the guard is there.
 
@@ -72,11 +74,15 @@ az postgres flexible-server create \
 az acr create --resource-group stm-prod --name YOURREGISTRY --sku Basic
 
 # Key Vault for secrets
+# Set STM_DATABASE_URL, STM_PROXY_SECRET, and STM_GRAPH_CLIENT_SECRET in your
+# shell from a secure source before running these commands.
 az keyvault create --resource-group stm-prod --name stm-vault
 az keyvault secret set --vault-name stm-vault --name stm-database-url \
-  --value "postgresql://USER:PASS@stm-db.postgres.database.azure.com:5432/strategic_tasks"
+  --value "$STM_DATABASE_URL"
 az keyvault secret set --vault-name stm-vault --name stm-proxy-secret \
-  --value "$(openssl rand -hex 32)"
+  --value "$STM_PROXY_SECRET"
+az keyvault secret set --vault-name stm-vault --name stm-graph-client-secret \
+  --value "$STM_GRAPH_CLIENT_SECRET"
 ```
 
 ### 3. Deploy
@@ -101,21 +107,22 @@ AUTH_MODE=app_service
 ENVIRONMENT=production
 APP_TRUSTED_PROXY_SECRET=<same value stored in Key Vault as stm-proxy-secret>
 AUTH_ALLOWED_TENANT_IDS=<your Azure AD tenant ID>
+AUTH_REQUIRE_EXPLICIT_ACCESS=true
+AUTH_DEFAULT_ROLE=
 AUTH_USE_DATABASE_ROLES=true
 ```
 
 ### 5. Initialize the database schema
 
-Run once after the first deployment:
+For the first deployment only, set this parameter in `azure/parameters.json`:
 
-```bash
-az containerapp exec \
-  --name stm-prod-sync \
-  --resource-group stm-prod \
-  --command "python -c \"from src.infrastructure.task_store import load_tasks_from_database; load_tasks_from_database('')\" "
+```json
+"bootstrapSchema": {
+  "value": "true"
+}
 ```
 
-Or set `DB_BOOTSTRAP_SCHEMA=true` on the sync container for the first run only, then set it back to `false`.
+Deploy once, confirm the sync worker records a successful run, then set `bootstrapSchema` back to `false` and redeploy. Runtime schema creation should not stay enabled in production after initialization.
 
 ## Graph / OneDrive access
 
@@ -131,8 +138,9 @@ The sync worker needs:
 - `GRAPH_TENANT_ID`
 - `GRAPH_CLIENT_ID`
 - `GRAPH_CLIENT_SECRET`
+- `syncSourceConfig` in `azure/parameters.json`
 
-Store all three in Key Vault and reference them in `parameters.json`.
+Store Graph secrets in Key Vault and keep the source config in `parameters.json`.
 
 ## Data source security
 

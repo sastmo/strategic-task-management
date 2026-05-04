@@ -1,28 +1,36 @@
-# Virtual environments
+# Virtual environments and local Python installs
 stm_env/
 .venv/
+venv/
 
 # Python cache
 __pycache__/
 *.pyc
 *.pyo
+.python-version
 
 # Streamlit
 .streamlit/
+.streamlit/secrets.toml
 
 # Local assistant tooling
 .claude/
 .codex/
+.agents/
 
-# Environment variables
+# Environment variables and local-only config
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
+*.local.json
+azure/parameters.json
 
 # Generated at runtime by Streamlit file-upload
 _uploaded_tasks.csv
 
 # Test and type-checker caches
+.cache/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -31,14 +39,31 @@ _uploaded_tasks.csv
 .coverage.*
 coverage.xml
 htmlcov/
+.hypothesis/
 
 # Logs
 *.log
+logs/
 
 # Build artifacts
 build/
 dist/
 *.egg-info/
+
+# Local databases and dumps
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+
+# Notebooks
+.ipynb_checkpoints/
+
+# IDE/editor metadata
+.idea/
+.vscode/
+*.swp
+*.swo
 
 # macOS
 .DS_Store

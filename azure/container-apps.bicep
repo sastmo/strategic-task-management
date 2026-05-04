@@ -36,10 +36,6 @@ param syncImageTag string
 @secure()
 param databaseUrl string
 
-@description('PostgreSQL password for health-check user')
-@secure()
-param postgresPassword string
-
 @description('Azure AD tenant ID that users must belong to')
 param allowedTenantId string = ''
 
@@ -62,6 +58,16 @@ param graphClientId string = ''
 @description('Microsoft Graph client secret')
 @secure()
 param graphClientSecret string = ''
+
+@description('Task source config for the sync worker, usually a Graph/SharePoint JSON source config')
+param syncSourceConfig string
+
+@description('Whether the sync worker may initialize schema objects. Use true only for first deployment/bootstrap.')
+@allowed([
+  'true'
+  'false'
+])
+param bootstrapSchema string = 'false'
 
 // --- Log Analytics Workspace --------------------------------------------------
 
@@ -128,6 +134,8 @@ resource appContainer 'Microsoft.App/containerApps@2023-05-01' = {
             { name: 'ENVIRONMENT', value: 'production' }
             { name: 'AUTH_MODE', value: 'app_service' }
             { name: 'AUTH_REQUIRED', value: 'true' }
+            { name: 'AUTH_REQUIRE_EXPLICIT_ACCESS', value: 'true' }
+            { name: 'AUTH_DEFAULT_ROLE', value: '' }
             { name: 'AUTH_USE_DATABASE_ROLES', value: 'true' }
             { name: 'AUTH_AUDIT_TO_DATABASE', value: 'true' }
             { name: 'AUTH_ALLOWED_TENANT_IDS', value: allowedTenantId }
@@ -182,8 +190,8 @@ resource syncContainer 'Microsoft.App/containerApps@2023-05-01' = {
           env: [
             { name: 'ENVIRONMENT', value: 'production' }
             { name: 'DATABASE_URL', secretRef: 'database-url' }
-            { name: 'DB_BOOTSTRAP_SCHEMA', value: 'true' }
-            { name: 'SYNC_SOURCE', value: '/app/data' }
+            { name: 'DB_BOOTSTRAP_SCHEMA', value: bootstrapSchema }
+            { name: 'SYNC_SOURCE_CONFIG', value: syncSourceConfig }
             { name: 'TASK_SOURCE_ROOT', value: '/app/data' }
             { name: 'SYNC_POLL_SECONDS', value: '30' }
             { name: 'SYNC_REFRESH_SECONDS', value: '1800' }

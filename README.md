@@ -1,129 +1,241 @@
 # Strategic Task Management
 
-A dashboard that consolidates strategic tasks from multiple data sources and displays them as an interactive bubble map and per-owner card view.
+An internal executive alignment dashboard for seeing whether teams are working on the priorities that matter most to current sales and future sales opportunities.
+
+This is intentionally not a task planner. Teams can keep using spreadsheets, notes, Asana, Jira, Linear, Notion, or whatever system already fits their daily work. This app sits above those sources and turns scattered task data into a concise visual signal for senior review.
 
 ![Dashboard overview](assets/0_dashboard-summary.png)
 
 ![Owner detail view](assets/1_dashboard-detail.png)
 
----
+## Product Fit
 
-## Run locally
+The target users are senior and C-level stakeholders who need signal quickly. They usually do not want another workflow tool, another complex dashboard, or a screen that rewards exploration. They need to know:
 
-Copy `.env.example` to `.env`, then:
+- Which teams are aligned with today's sales priorities.
+- Which teams are investing in future sales opportunities.
+- Which important areas are paused, incomplete, or under-owned.
+- Where visibility should create follow-up pressure.
+
+The central view is a simple impact matrix. One axis represents impact on the current offering and sales today. The other represents future offering, next packages, and growth. Owner cards add just enough detail to make accountability visible without turning the dashboard into a planning surface.
+
+The minimal interaction model is deliberate. The dashboard is designed for fast executive review, sharing, and embedding in internal channels such as Slack or an internal portal.
+
+## What This Is Not
+
+- It is not a generic to-do app.
+- It is not a replacement for planning or execution tools.
+- It is not trying to compete with ClickUp, Todoist, Asana, Trello, Linear, or Notion.
+- It is not optimized for deep task editing, comments, kanban movement, or personal productivity.
+
+The value is alignment pressure: clear visibility into whether teams are working on the right things.
+
+## Architecture
+
+The app is a small Python service with a separate sync worker and a PostgreSQL warehouse.
+
+```
+app.py                  Streamlit entry point
+src/domain/             Task model and business rules
+src/application/        Auth, settings, sync orchestration, workflow loading
+src/infrastructure/     PostgreSQL, Microsoft Graph, source readers
+src/presentation/       Dashboard HTML, CSS, JavaScript, auth UI
+sql/                    Optional warehouse, mart, and ops SQL views
+tests/                  Unit, behavior, security, and integration tests
+azure/                  Azure Container Apps deployment template and script
+data/                   Local sample source files
+assets/                 README screenshots
+```
+
+Runtime shape:
+
+- `app`: Streamlit dashboard, reads current task state from PostgreSQL in production.
+- `sync`: background worker, ingests source data and writes warehouse snapshots.
+- `postgres`: local Docker database; use Azure Database for PostgreSQL in production.
+
+The production app should serve from `DATABASE_URL`/`TASKS_SOURCE` pointing at PostgreSQL. Source ingestion should happen through the sync worker.
+
+## Data Flow
+
+1. Source data comes from CSV, Excel, JSON, Microsoft Graph/SharePoint, or another configured source.
+2. The sync worker normalizes rows into a task frame.
+3. The worker writes a snapshot into PostgreSQL.
+4. The warehouse tracks current state, insertions, updates, deletions, and completion timestamps.
+5. The dashboard reads the current warehouse view and displays the executive alignment matrix.
+
+Supported production source pattern:
+
+- Prefer Microsoft Graph/SharePoint or controlled internal files for ingestion.
+- Generic HTTP API sources are blocked by default when `ENVIRONMENT=production`.
+- The dashboard itself should read from PostgreSQL, not directly from source files.
+
+## Local Development
+
+Copy the example environment file and choose a local-only database password:
+
+```bash
+cp .env.example .env
+```
+
+Run the full local stack:
 
 ```bash
 docker compose up --build
 ```
 
-The app is available at `http://localhost:8501`.
+The dashboard will be available at:
 
-For a direct Python run instead of Docker:
+```text
+http://localhost:8501
+```
+
+For a direct Python run:
 
 ```bash
 ./run.sh
 ```
 
----
+Direct Python mode is useful for UI iteration with sample data. Docker Compose is closer to the production shape because it includes PostgreSQL and the sync worker.
 
-## Data sources
+## Configuration
 
-Set `TASKS_SOURCE` (for the web app) or `SYNC_SOURCE_CONFIG` (for the background sync service) to any supported source.
+Important environment variables:
 
-| Type | Example |
+| Variable | Purpose |
 |---|---|
-| CSV | `/app/data/tasks.csv` |
-| Excel | `{"source": "plan.xlsx", "all_sheets": true}` |
-| JSON | `/app/data/tasks.json` |
-| REST API | `https://api.example.com/tasks` |
-| SharePoint | see below |
+| `ENVIRONMENT` | Set to `production` to enable production safety guards |
+| `DATABASE_URL` | PostgreSQL warehouse/auth database URL |
+| `TASKS_SOURCE` | Dashboard read source; must be PostgreSQL in production |
+| `SYNC_SOURCE_CONFIG` | Source config used by the sync worker |
+| `AUTH_MODE` | `local`, `app_service`, or `disabled` |
+| `AUTH_USE_DATABASE_ROLES` | Uses database-backed app roles when true |
+| `AUTH_REQUIRE_EXPLICIT_ACCESS` | Prevents default access grants when true |
+| `APP_TRUSTED_PROXY_SECRET` | Shared proxy secret required for production App Service auth |
+| `GRAPH_TENANT_ID` | Microsoft Graph tenant ID |
+| `GRAPH_CLIENT_ID` | Microsoft Graph app/client ID |
+| `GRAPH_CLIENT_SECRET` | Microsoft Graph client secret, stored outside git |
+| `DB_BOOTSTRAP_SCHEMA` | Allows first-run schema initialization when true |
 
-### SharePoint / Microsoft Graph
+Production startup fails safely when:
 
-```json
-{
-  "sources": [
-    {
-      "kind": "graph",
-      "site_url": "https://contoso.sharepoint.com/sites/Strategy",
-      "drive_name": "Shared Documents",
-      "file_path": "/Plans/master.xlsx",
-      "all_sheets": true
-    }
-  ]
-}
-```
+- `AUTH_MODE=local` or `AUTH_MODE=disabled` is used with `ENVIRONMENT=production`.
+- `AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY=1` is used in production.
+- `AUTH_MODE=app_service` is used in production without `APP_TRUSTED_PROXY_SECRET`.
+- `DATABASE_URL` is missing in production.
+- `TASKS_SOURCE` is not a PostgreSQL URL in production.
 
-Required environment variables:
+## Authentication And Authorization
 
-```
-GRAPH_AUTH_MODE=client_secret
-GRAPH_TENANT_ID=...
-GRAPH_CLIENT_ID=...
-GRAPH_CLIENT_SECRET=...
-```
+Local development uses `AUTH_MODE=local`.
 
-### Large CSV handling
-
-For large CSV sources, you can ask the loader to read the file in smaller batches:
+Production should use:
 
 ```env
-TASK_CSV_CHUNK_ROWS=5000
+ENVIRONMENT=production
+AUTH_MODE=app_service
+AUTH_REQUIRED=true
+AUTH_REQUIRE_EXPLICIT_ACCESS=true
+AUTH_DEFAULT_ROLE=
+AUTH_USE_DATABASE_ROLES=true
+AUTH_AUDIT_TO_DATABASE=true
+APP_TRUSTED_PROXY_SECRET=<stored outside git>
 ```
 
-This keeps the sync model snapshot-based, but lowers peak memory during CSV ingestion by processing the file in smaller DataFrame chunks before the final merge.
+Azure handles sign-in. The app then reads the Azure identity headers, validates the expected trusted proxy secret, checks tenant/group/database roles, and records lightweight audit events.
 
----
+For a maximum internal audience of roughly 50 users, use Azure AD groups or database role assignments to keep access explicit.
 
-## Authentication
+## Azure Deployment
 
-| `AUTH_MODE` | When to use |
-|---|---|
-| `local` | Local development, no sign-in required |
-| `app_service` | Azure App Service with AAD |
-| `disabled` | Fully open, internal deployments |
+The repository includes an Azure Container Apps template and deployment script:
 
----
-
-## Project layout
-
-```
-app.py                  Streamlit entry point
-src/domain/             Core models and business rules
-src/application/        Auth, sync, and workflow orchestration
-src/infrastructure/     Database, Graph API, file readers
-src/presentation/       Dashboard rendering and auth UI
-sql/                    Warehouse and analytics SQL views
-tests/                  Unit and behaviour tests
-data/                   Default local task files
-assets/                 Screenshots and static files
+```text
+azure/container-apps.bicep
+azure/deploy.sh
+azure/parameters.example.json
 ```
 
----
+Production assumptions:
 
-## Tests
+- Azure Container Apps or App Service style authentication in front of Streamlit.
+- Azure Database for PostgreSQL as the warehouse/auth database.
+- Azure Key Vault references for database URL, proxy secret, and Graph secret.
+- Microsoft Graph/SharePoint as the preferred source adapter for spreadsheet-based executive workflows.
+- HTTPS-only ingress.
+
+First deployment:
+
+1. Copy `azure/parameters.example.json` to `azure/parameters.json`.
+2. Replace placeholders with your tenant, registry, Key Vault, group IDs, and source config.
+3. Set `bootstrapSchema` to `true` only for the first initialization run.
+4. Deploy with `./azure/deploy.sh --resource-group <rg> --registry <registry>.azurecr.io --env-name <name>`.
+5. Confirm the sync worker records a successful run.
+6. Set `bootstrapSchema` back to `false` and redeploy.
+
+Detailed Azure notes live in [docs/production.md](docs/production.md).
+
+## Database
+
+The database layer uses PostgreSQL with a small connection pool. The schema includes:
+
+- `ops.ingestion_runs` for sync status and freshness.
+- `staging.task_records` and `staging.task_snapshots` for raw normalized inputs.
+- `warehouse.tasks_current` for dashboard reads.
+- `warehouse.task_history` for change tracking.
+- `app.users`, `app.user_role_assignments`, and audit tables for authorization and activity.
+
+Schema creation is explicit. Use `DB_BOOTSTRAP_SCHEMA=true` only for local development or first production initialization.
+
+Optional SQL views in `sql/` provide analyst-facing portfolio, owner scorecard, and sync-health views.
+
+## Security Posture
+
+Production hardening in this repo focuses on the risks that matter for a small internal executive app:
+
+- Production auth fails closed for unsafe modes.
+- Database-backed role lookup failures deny access when DB roles are required.
+- Generic HTTP API task sources are blocked by default in production.
+- Local file sources are restricted by `TASK_SOURCE_ROOT`.
+- Dashboard JSON is escaped before being embedded into HTML.
+- Graph secrets and database URLs are represented as placeholders/examples only.
+- Local `.env`, Azure parameter files, caches, logs, and assistant metadata are ignored.
+
+Manual production responsibilities:
+
+- Store real secrets in Azure Key Vault or Azure App Settings.
+- Restrict Azure authentication to the intended tenant and groups.
+- Assign the app/sync identity only the Graph and database permissions it needs.
+- Rotate secrets if any real value was ever copied into local files or chat.
+- Enable branch protection and required CI checks before production changes merge.
+
+## Testing
+
+Run the main checks:
 
 ```bash
-python3.12 -m unittest discover -s tests -v
-python3.12 -m mypy
 ruff check .
+mypy
+python -m unittest discover -s tests -v
 ```
 
-Optional integration test:
+Run coverage the same way CI does:
 
 ```bash
-TEST_DATABASE_URL=postgresql://... python3.12 -m unittest tests.test_task_store_integration -v
+pytest tests/ -v --tb=short --cov=src --cov-report=xml --cov-report=term-missing --cov-fail-under=70
 ```
 
----
+Optional PostgreSQL integration tests:
 
-## Production handoff
+```bash
+TEST_DATABASE_URL=postgresql://... python -m unittest tests.test_task_store_integration -v
+```
 
-For Azure/App Service production:
+CI runs Ruff, mypy, source compilation, tests with coverage, coverage artifact upload, and Docker Compose config validation.
 
-- keep the same app code
-- set `AUTH_MODE=app_service`
-- store secrets in Azure configuration or a secret manager, not in git
-- use one Graph app registration for the sync worker and Azure/App Service auth for website login
-- keep the database as the live read layer for the app
-- use `TASK_SOURCE_ROOT` when mounting local folders in dev or worker environments
+## Repository Hygiene
+
+Tracked files should be source, tests, docs, SQL assets, sample data, screenshots, Docker/Azure config, and examples.
+
+Ignored files include local `.env` files, Azure `parameters.json`, virtual environments, caches, coverage output, logs, local databases, IDE metadata, OS files, and local assistant tooling such as `.claude/` and `.codex/`.
+
+Do not commit real secrets, local database dumps, generated caches, or agent-specific metadata.

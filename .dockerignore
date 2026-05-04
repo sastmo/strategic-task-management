@@ -1,10 +1,15 @@
 stm_env/
 .venv/
+venv/
 __pycache__/
 *.pyc
+.pycache_temp/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 .git
 .gitignore
 .DS_Store
@@ -13,6 +18,8 @@ __pycache__/
 .streamlit/
 .github/
 .claude/
+.codex/
+.agents/
 tests/
 sql/
 docs/
@@ -20,8 +27,12 @@ build/
 dist/
 *.egg-info/
 *.log
+*.db
+*.sqlite
+*.sqlite3
 run.sh
 run.bat
 README.md
 data/
 assets/
+azure/parameters.json

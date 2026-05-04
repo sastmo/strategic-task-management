@@ -11,7 +11,7 @@ from src.application.auth_service import (
     resolve_auth_on_db_error,
     resolve_request_authorization,
 )
-from src.application.settings import AuthSettings, load_auth_settings
+from src.application.settings import AuthSettings, load_app_settings, load_auth_settings
 from src.infrastructure.auth.app_service import parse_app_service_user
 
 
@@ -380,6 +380,19 @@ class ProductionSettingsGuardTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 load_auth_settings()
 
+    def test_app_service_requires_proxy_secret_in_production(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "AUTH_MODE": "app_service",
+                "ENVIRONMENT": "production",
+                "APP_TRUSTED_PROXY_SECRET": "",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(RuntimeError):
+                load_auth_settings()
+
     def test_unverified_proxy_allowed_outside_production(self) -> None:
         with patch.dict(
             "os.environ",
@@ -392,6 +405,56 @@ class ProductionSettingsGuardTests(unittest.TestCase):
         ):
             settings = load_auth_settings()
         self.assertTrue(settings.allow_unverified_proxy)
+
+
+class ProductionAppSettingsGuardTests(unittest.TestCase):
+    """Production app settings must point the dashboard at the warehouse."""
+
+    def test_database_url_required_in_production(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "ENVIRONMENT": "production",
+                "AUTH_MODE": "app_service",
+                "APP_TRUSTED_PROXY_SECRET": "secret",
+                "TASKS_SOURCE": "postgresql://user:pass@example/db",
+                "DATABASE_URL": "",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(RuntimeError):
+                load_app_settings("data/tasks.csv")
+
+    def test_tasks_source_must_be_database_url_in_production(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "ENVIRONMENT": "production",
+                "AUTH_MODE": "app_service",
+                "APP_TRUSTED_PROXY_SECRET": "secret",
+                "DATABASE_URL": "postgresql://user:pass@example/db",
+                "TASKS_SOURCE": "/app/data/tasks.csv",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(RuntimeError):
+                load_app_settings("data/tasks.csv")
+
+    def test_database_source_allowed_in_production(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "ENVIRONMENT": "production",
+                "AUTH_MODE": "app_service",
+                "APP_TRUSTED_PROXY_SECRET": "secret",
+                "DATABASE_URL": "postgresql://user:pass@example/db",
+                "TASKS_SOURCE": "postgresql://user:pass@example/db",
+            },
+            clear=False,
+        ):
+            settings = load_app_settings("data/tasks.csv")
+
+        self.assertEqual(settings.database_url, "postgresql://user:pass@example/db")
 
 
 class FailClosedDbUnavailableTests(unittest.TestCase):

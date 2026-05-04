@@ -8,10 +8,25 @@ from src.domain.identity import AppRole, normalize_role_collection
 DEFAULT_LOCAL_USER_EMAIL = "local.admin@example.com"
 SUPPORTED_AUTH_MODES = {"local", "app_service", "disabled"}
 _DEFAULT_PROXY_HEADER = "X-Proxy-Auth"
+_PRODUCTION_ENVIRONMENT = "production"
 
 
 def env_flag(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def current_environment() -> str:
+    return os.getenv("ENVIRONMENT", "development").strip().lower()
+
+
+def is_production_environment() -> bool:
+    return current_environment() == _PRODUCTION_ENVIRONMENT
+
+
+def is_database_url_value(value: object) -> bool:
+    return isinstance(value, str) and value.strip().startswith(
+        ("postgresql://", "postgres://")
+    )
 
 
 def load_database_url(*, required: bool = False) -> str:
@@ -116,8 +131,7 @@ def _reject_in_production(flag_name: str, override_env: str, guidance: str) -> N
     dangerous flag must be explicitly rejected so the app fails at startup
     rather than silently running with an unsafe configuration.
     """
-    environment = os.getenv("ENVIRONMENT", "").strip().lower()
-    if environment != "production":
+    if not is_production_environment():
         return
     if env_flag(override_env):
         return
@@ -152,14 +166,20 @@ def load_auth_settings() -> AuthSettings:
     # allowing any caller to forge Azure identity headers.
     allow_unverified_proxy = env_flag("AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY")
     if allow_unverified_proxy:
-        environment = os.getenv("ENVIRONMENT", "").strip().lower()
-        if environment == "production":
+        if is_production_environment():
             raise RuntimeError(
                 "AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY=1 is not allowed when "
                 "ENVIRONMENT=production. Set APP_TRUSTED_PROXY_SECRET instead."
             )
 
     local_user_email = os.getenv("AUTH_LOCAL_USER_EMAIL", DEFAULT_LOCAL_USER_EMAIL).strip().lower()
+    trusted_proxy_secret = os.getenv("APP_TRUSTED_PROXY_SECRET", "").strip()
+
+    if is_production_environment() and mode == "app_service" and not trusted_proxy_secret:
+        raise RuntimeError(
+            "APP_TRUSTED_PROXY_SECRET is required when ENVIRONMENT=production "
+            "and AUTH_MODE=app_service."
+        )
 
     return AuthSettings(
         mode=mode,
@@ -177,21 +197,40 @@ def load_auth_settings() -> AuthSettings:
         admin_group_ids=env_list("AUTH_ADMIN_GROUP_IDS"),
         app_service_provider=os.getenv("AUTH_APP_SERVICE_PROVIDER", "aad").strip() or "aad",
         show_status_panel=env_flag("APP_AUTH_SHOW_STATUS", "true"),
-        trusted_proxy_secret=os.getenv("APP_TRUSTED_PROXY_SECRET", "").strip(),
+        trusted_proxy_secret=trusted_proxy_secret,
         trusted_proxy_header=os.getenv("APP_TRUSTED_PROXY_HEADER", _DEFAULT_PROXY_HEADER).strip()
         or _DEFAULT_PROXY_HEADER,
         allow_unverified_proxy=allow_unverified_proxy,
     )
 
 
+def validate_app_settings(settings: AppSettings) -> None:
+    if not is_production_environment():
+        return
+
+    if not settings.database_url:
+        raise RuntimeError(
+            "DATABASE_URL is required when ENVIRONMENT=production. "
+            "Use Azure App Settings or Key Vault references for the production database URL."
+        )
+
+    if not is_database_url_value(settings.tasks_source):
+        raise RuntimeError(
+            "TASKS_SOURCE must point to the PostgreSQL warehouse when ENVIRONMENT=production. "
+            "Run source ingestion through the sync worker and serve the dashboard from DATABASE_URL."
+        )
+
+
 def load_app_settings(default_source: str) -> AppSettings:
-    return AppSettings(
+    settings = AppSettings(
         tasks_source=os.getenv("TASKS_SOURCE", default_source),
         database_url=load_database_url(),
         refresh_ms=int(os.getenv("APP_REFRESH_MS", "60000")),
         dashboard_height=int(os.getenv("APP_DASHBOARD_HEIGHT", "1900")),
         auth=load_auth_settings(),
     )
+    validate_app_settings(settings)
+    return settings
 
 
 def load_auto_sync_settings(default_source: str) -> AutoSyncSettings:
