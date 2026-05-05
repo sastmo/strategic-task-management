@@ -1,120 +1,116 @@
 # Production Notes
 
-This project is designed so the same code can run locally in Docker and later move to a cloud host with configuration changes instead of a rewrite.
+Strategic Alignment Board is designed so the same code can run locally in Docker and later move to Azure with configuration changes instead of a rewrite.
 
-## Recommended shape
+The production shape is intentionally simple:
 
-- `app`: Streamlit UI container
-- `sync`: background worker container
-- `db`: PostgreSQL in local development (managed service in production)
+- `app`: Streamlit dashboard container
+- `sync`: background ingestion worker container
+- `db`: managed PostgreSQL database
+- `auth`: existing Microsoft/Azure identity layer
+- `secrets`: Azure Key Vault or application settings
 
-## Authentication
+## Recommended Production Shape
 
-Supported modes:
-
-- `AUTH_MODE=local` for local development only
-- `AUTH_MODE=app_service` for Azure App Service / Easy Auth in production
-- `AUTH_MODE=disabled` only for intentionally open internal environments (not recommended)
-
-### Production guard
-
-Setting `ENVIRONMENT=production` enforces the following at startup:
-
-| Configuration | Allowed in production? |
+| Component | Role |
 |---|---|
-| `AUTH_MODE=local` | No -- raises `RuntimeError` unless `ALLOW_LOCAL_AUTH_IN_PRODUCTION=1` |
-| `AUTH_MODE=disabled` | No -- raises `RuntimeError` unless `ALLOW_DISABLED_AUTH_IN_PRODUCTION=1` |
-| `AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY=1` | No -- raises `RuntimeError` unconditionally |
-| Missing `APP_TRUSTED_PROXY_SECRET` with `AUTH_MODE=app_service` | No -- raises `RuntimeError` |
-| Non-database `TASKS_SOURCE` | No -- raises `RuntimeError` |
+| Streamlit app | Serves the executive alignment board |
+| Sync worker | Reads configured sources and writes warehouse snapshots |
+| PostgreSQL | Stores current task state, history, sync runs, auth roles, and audit events |
+| Microsoft Graph / SharePoint | Preferred production source for spreadsheet-based workflows |
+| Azure auth | Provides organization sign-in and identity headers |
+| Key Vault | Stores database URLs, proxy secrets, and Graph secrets |
 
-Never set the override flags in a real deployment.  They exist only to document why the guard is there.
+## Production Configuration
 
-### Fail-closed database behavior
+Set production mode explicitly:
 
-When `AUTH_USE_DATABASE_ROLES=true` and the database becomes unreachable:
-
-- The app denies access to every request until the database recovers.
-- No fallback to token claims or default roles occurs.
-- A `ERROR` log entry is written for each denied request.
-
-This is intentional.  A database outage must not silently degrade to
-unauthenticated access on an executive dashboard.
-
-## Azure deployment
-
-See `azure/container-apps.bicep` for the full Bicep template.  The minimal
-steps for a first deployment:
-
-### 1. Prerequisites
-
-```bash
-az login
-az acr login --name YOURREGISTRY
-cp azure/parameters.example.json azure/parameters.json
-# Edit azure/parameters.json with your values
-```
-
-### 2. Create supporting resources (once)
-
-```bash
-# Resource group
-az group create --name stm-prod --location canadacentral
-
-# Azure Database for PostgreSQL Flexible Server
-az postgres flexible-server create \
-  --resource-group stm-prod \
-  --name stm-db \
-  --sku-name Standard_B1ms \
-  --tier Burstable \
-  --storage-size 32 \
-  --version 16
-
-# Azure Container Registry
-az acr create --resource-group stm-prod --name YOURREGISTRY --sku Basic
-
-# Key Vault for secrets
-# Set STM_DATABASE_URL, STM_PROXY_SECRET, and STM_GRAPH_CLIENT_SECRET in your
-# shell from a secure source before running these commands.
-az keyvault create --resource-group stm-prod --name stm-vault
-az keyvault secret set --vault-name stm-vault --name stm-database-url \
-  --value "$STM_DATABASE_URL"
-az keyvault secret set --vault-name stm-vault --name stm-proxy-secret \
-  --value "$STM_PROXY_SECRET"
-az keyvault secret set --vault-name stm-vault --name stm-graph-client-secret \
-  --value "$STM_GRAPH_CLIENT_SECRET"
-```
-
-### 3. Deploy
-
-```bash
-./azure/deploy.sh \
-  --resource-group stm-prod \
-  --registry YOURREGISTRY.azurecr.io \
-  --env-name stm-prod
-```
-
-### 4. Enable Easy Auth
-
-In the Azure Portal, open the app Container App, go to **Authentication**, add
-Microsoft identity provider.  Set the client ID and secret of your app
-registration.
-
-Set these application settings on the container app:
-
-```
-AUTH_MODE=app_service
+```env
 ENVIRONMENT=production
-APP_TRUSTED_PROXY_SECRET=<same value stored in Key Vault as stm-proxy-secret>
-AUTH_ALLOWED_TENANT_IDS=<your Azure AD tenant ID>
+TASKS_SOURCE=postgresql://...
+DATABASE_URL=postgresql://...
+AUTH_MODE=app_service
+AUTH_REQUIRED=true
 AUTH_REQUIRE_EXPLICIT_ACCESS=true
 AUTH_DEFAULT_ROLE=
 AUTH_USE_DATABASE_ROLES=true
+AUTH_AUDIT_TO_DATABASE=true
+APP_TRUSTED_PROXY_SECRET=<stored outside git>
 ```
 
-### 5. Initialize the database schema
+Optional Microsoft Graph settings for the sync worker:
 
-For the first deployment only, set this parameter in `azure/parameters.json`:
+```env
+GRAPH_TENANT_ID=<tenant-id>
+GRAPH_CLIENT_ID=<client-id>
+GRAPH_CLIENT_SECRET=<stored outside git>
+SYNC_SOURCE_CONFIG=<source-config>
+```
+
+## Production Guards
+
+When `ENVIRONMENT=production`, the app rejects unsafe startup configurations.
+
+| Configuration | Production behavior |
+|---|---|
+| `AUTH_MODE=local` | Rejected unless explicitly overridden |
+| `AUTH_MODE=disabled` | Rejected unless explicitly overridden |
+| `AUTH_ALLOW_UNVERIFIED_APP_SERVICE_PROXY=1` | Rejected |
+| Missing `APP_TRUSTED_PROXY_SECRET` with `AUTH_MODE=app_service` | Rejected |
+| Missing `DATABASE_URL` | Rejected |
+| Non-PostgreSQL `TASKS_SOURCE` | Rejected |
+
+Do not use override flags in a real deployment. They exist only to make local testing and guard behavior explicit.
+
+## Authentication
+
+Local development can use:
+
+```env
+AUTH_MODE=local
+```
+
+Production should use Azure/App Service style authentication:
+
+1. Azure authenticates the user.
+2. The app receives identity headers from the trusted auth layer.
+3. `APP_TRUSTED_PROXY_SECRET` confirms the request passed through the expected proxy.
+4. The app checks explicit access through database roles or configured groups.
+5. Audit events can be written to PostgreSQL.
+
+When `AUTH_USE_DATABASE_ROLES=true`, database lookup failures deny access. The app does not silently fall back to default roles or token claims.
+
+## Azure Deployment
+
+The repository includes:
+
+```text
+azure/container-apps.bicep
+azure/deploy.sh
+azure/parameters.example.json
+```
+
+Minimal deployment path:
+
+1. Create or confirm the Azure resources: resource group, container registry, PostgreSQL, Key Vault, and app registration.
+2. Copy `azure/parameters.example.json` to `azure/parameters.json`.
+3. Fill in tenant IDs, group IDs, registry name, Key Vault references, and source configuration.
+4. Store real secrets in Key Vault or Azure application settings.
+5. Deploy with:
+
+```bash
+./azure/deploy.sh \
+  --resource-group <resource-group> \
+  --registry <registry>.azurecr.io \
+  --env-name <environment-name>
+```
+
+6. Enable Microsoft authentication for the container app or fronting App Service.
+7. Confirm the sync worker completes a successful ingestion run.
+
+## Database Initialization
+
+For the first deployment only, set:
 
 ```json
 "bootstrapSchema": {
@@ -122,61 +118,63 @@ For the first deployment only, set this parameter in `azure/parameters.json`:
 }
 ```
 
-Deploy once, confirm the sync worker records a successful run, then set `bootstrapSchema` back to `false` and redeploy. Runtime schema creation should not stay enabled in production after initialization.
+Deploy once, confirm the schema exists and the sync worker runs successfully, then set it back to:
 
-## Graph / OneDrive access
+```json
+"bootstrapSchema": {
+  "value": "false"
+}
+```
 
-The sync worker uses Microsoft Graph as a source adapter.
+Runtime schema creation should not remain enabled after production initialization.
 
-Typical production setup:
+## Data Source Security
 
-- one app registration for website login (handled by Easy Auth)
-- one app registration for Graph access (used by the sync worker)
+In production, preferred sources are:
 
-The sync worker needs:
+- PostgreSQL for dashboard reads
+- Microsoft Graph / SharePoint for controlled spreadsheet ingestion
+- Local files only when restricted by `TASK_SOURCE_ROOT`
 
-- `GRAPH_TENANT_ID`
-- `GRAPH_CLIENT_ID`
-- `GRAPH_CLIENT_SECRET`
-- `syncSourceConfig` in `azure/parameters.json`
-
-Store Graph secrets in Key Vault and keep the source config in `parameters.json`.
-
-## Data source security
-
-In production (`ENVIRONMENT=production`):
-
-- Generic HTTP API sources (`api` kind) are **blocked by default**.
-- Allowed sources: `postgres`, `graph` (SharePoint/OneDrive), local files inside `TASK_SOURCE_ROOT`.
-- To re-enable API sources explicitly: `TASK_SOURCE_ALLOWED_KINDS=csv,json,excel,graph,postgres,api`
+Generic HTTP API sources are blocked by default in production. Re-enable them only when there is a clear trust boundary and review process.
 
 ## Secrets
 
-Do not commit real secrets.
+Never commit real secrets.
 
-Store secrets in:
+Keep these outside git:
 
-- Azure Key Vault referenced from `parameters.json`
-- Azure App Service / Container App application settings (for values not in Key Vault)
-
-At minimum, keep these out of git:
-
-- `POSTGRES_PASSWORD` / database URL
+- `DATABASE_URL`
+- `POSTGRES_PASSWORD`
 - `GRAPH_CLIENT_SECRET`
 - `APP_TRUSTED_PROXY_SECRET`
+- Azure parameter files containing real environment values
 
-## Warehouse behavior
+Use Azure Key Vault or Azure application settings for production values.
 
-The sync process is snapshot-based:
+## Warehouse Behavior
 
-- stage incoming rows
-- resolve the current snapshot
-- merge into `warehouse.tasks_current`
-- append changes to `warehouse.task_history`
+The sync worker uses a snapshot pattern:
 
-## Operational notes
+1. Read source data.
+2. Normalize records.
+3. Stage incoming rows.
+4. Resolve the current snapshot.
+5. Merge current records into `warehouse.tasks_current`.
+6. Append changes to `warehouse.task_history`.
+7. Record sync status in `ops.ingestion_runs`.
 
-- `TASK_SOURCE_ROOT` limits local file-source expansion
-- `TASK_CSV_CHUNK_ROWS` can reduce peak memory during large CSV loads
-- `TEST_DATABASE_URL` enables the Postgres integration test path
-- `DB_BOOTSTRAP_SCHEMA=true` auto-creates schema on first run; set to `false` in production after initialization
+This gives the dashboard a stable current view while preserving enough history for auditing and freshness checks.
+
+## Operational Notes
+
+Useful settings:
+
+| Setting | Purpose |
+|---|---|
+| `TASK_SOURCE_ROOT` | Restricts local file-source access |
+| `TASK_CSV_CHUNK_ROWS` | Reduces peak memory during large CSV loads |
+| `TEST_DATABASE_URL` | Enables PostgreSQL integration tests |
+| `DB_BOOTSTRAP_SCHEMA` | Allows first-run schema initialization |
+
+Set `DB_BOOTSTRAP_SCHEMA=false` after production initialization.

@@ -1,3 +1,12 @@
+[![CI](https://github.com/sastmo/strategic-task-management/actions/workflows/ci.yml/badge.svg)](https://github.com/sastmo/strategic-task-management/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-Executive%20Dashboard-ff4b4b.svg)](https://streamlit.io/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Warehouse-336791.svg)](https://www.postgresql.org/)
+[![Azure](https://img.shields.io/badge/Azure-Container%20Apps-0078D4.svg)](https://azure.microsoft.com/en-us/products/container-apps)
+[![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED.svg)](https://www.docker.com/)
+[![Security](https://img.shields.io/badge/Security-Fail--Closed-brightgreen.svg)]()
+[![Product](https://img.shields.io/badge/Product-Executive%20Alignment-purple.svg)]()
+
 # Strategic Task Management
 
 An internal executive alignment dashboard for seeing whether teams are working on the priorities that matter most to current sales and future sales opportunities.
